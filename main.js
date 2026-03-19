@@ -9,7 +9,7 @@ const clock = new THREE.Clock();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x88ccee);
-scene.fog = new THREE.Fog(0x88ccee, 0, 50);
+scene.fog = new THREE.Fog(0x88ccee, 0, 120);
 
 const camera = new THREE.PerspectiveCamera(
   75,
@@ -19,33 +19,35 @@ const camera = new THREE.PerspectiveCamera(
 );
 camera.rotation.order = 'YXZ';
 
-// Luces
-const fillLight1 = new THREE.HemisphereLight(0x4488bb, 0x002244, 0.5);
+// ================== LUCES ==================
+const fillLight1 = new THREE.HemisphereLight(0xffffff, 0x4b5b6b, 1.2);
 scene.add(fillLight1);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(-5, 25, -1);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+directionalLight.position.set(15, 25, 10);
 directionalLight.castShadow = true;
 
 directionalLight.shadow.camera.near = 0.01;
-directionalLight.shadow.camera.far = 500;
-directionalLight.shadow.camera.right = 30;
-directionalLight.shadow.camera.left = -30;
-directionalLight.shadow.camera.top = 30;
-directionalLight.shadow.camera.bottom = -30;
-directionalLight.shadow.mapSize.width = 1024;
-directionalLight.shadow.mapSize.height = 1024;
+directionalLight.shadow.camera.far = 300;
+directionalLight.shadow.camera.right = 50;
+directionalLight.shadow.camera.left = -50;
+directionalLight.shadow.camera.top = 50;
+directionalLight.shadow.camera.bottom = -50;
+directionalLight.shadow.mapSize.width = 2048;
+directionalLight.shadow.mapSize.height = 2048;
 
 scene.add(directionalLight);
 
+// ================== RENDER ==================
 const container = document.body;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.VSMShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 container.appendChild(renderer.domElement);
 
 const stats = new Stats();
@@ -53,12 +55,12 @@ stats.dom.style.position = 'absolute';
 stats.dom.style.top = '0px';
 container.appendChild(stats.dom);
 
-// Mundo y jugador
+// ================== MUNDO Y JUGADOR ==================
 const worldOctree = new Octree();
 
 const playerCollider = new Capsule(
-  new THREE.Vector3(0, 0.35, 0),
-  new THREE.Vector3(0, 1, 0),
+  new THREE.Vector3(0, 0.35, 8),
+  new THREE.Vector3(0, 1.35, 8),
   0.35
 );
 
@@ -70,8 +72,11 @@ let mouseTime = 0;
 
 const keyStates = {};
 
-// ===== BOLAS =====
-const NUM_SPHERES = 100;
+const GRAVITY = 25;
+const STEPS_PER_FRAME = 5;
+
+// ================== PELOTAS ==================
+const NUM_SPHERES = 60;
 const SPHERE_RADIUS = 0.2;
 const spheres = [];
 
@@ -93,7 +98,7 @@ for (let i = 0; i < NUM_SPHERES; i++) {
   });
 }
 
-// ===== INPUT =====
+// ================== INPUT ==================
 document.addEventListener('keydown', (event) => {
   keyStates[event.code] = true;
 });
@@ -102,10 +107,14 @@ document.addEventListener('keyup', (event) => {
   keyStates[event.code] = false;
 });
 
-container.addEventListener('mousedown', () => {
+container.addEventListener('mousedown', async () => {
   if (document.pointerLockElement !== document.body) {
-    document.body.requestPointerLock();
-    mouseTime = performance.now();
+    try {
+      await document.body.requestPointerLock();
+      mouseTime = performance.now();
+    } catch (error) {
+      console.warn('No se pudo activar el pointer lock:', error);
+    }
   } else {
     throwBall();
   }
@@ -116,20 +125,48 @@ document.body.addEventListener('mousemove', (event) => {
     camera.rotation.y -= event.movementX / 500;
     camera.rotation.x -= event.movementY / 500;
 
-    // Limitar giro vertical
     camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
   }
 });
 
-// ===== CARGA DEL MAPA =====
+// ================== CARGA DEL ESCENARIO ==================
 const loader = new GLTFLoader();
+const MODEL_PATH = './models/futsal_court/scene.gltf';
 
-loader.load('./models/collision-world.glb', (gltf) => {
-  scene.add(gltf.scene);
-  worldOctree.fromGraphNode(gltf.scene);
-});
+loader.load(
+  MODEL_PATH,
+  (gltf) => {
+    const model = gltf.scene;
 
-// ===== FÍSICA JUGADOR =====
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+
+        if (child.material) {
+          child.material.side = THREE.FrontSide;
+        }
+      }
+    });
+
+    model.scale.set(1, 1, 1);
+    model.position.set(0, 0, 0);
+    model.rotation.set(0, 0, 0);
+
+    scene.add(model);
+    worldOctree.fromGraphNode(model);
+
+    playerCollider.start.set(0, 0.35, 8);
+    playerCollider.end.set(0, 1.35, 8);
+    camera.position.copy(playerCollider.end);
+  },
+  undefined,
+  (error) => {
+    console.error('Error cargando el modelo Futsal Court:', error);
+  }
+);
+
+// ================== FÍSICA JUGADOR ==================
 function playerCollisions() {
   const result = worldOctree.capsuleIntersect(playerCollider);
 
@@ -153,7 +190,7 @@ function updatePlayer(deltaTime) {
   let damping = Math.exp(-4 * deltaTime) - 1;
 
   if (!playerOnFloor) {
-    playerVelocity.y -= 25 * deltaTime;
+    playerVelocity.y -= GRAVITY * deltaTime;
     damping *= 0.1;
   }
 
@@ -206,13 +243,15 @@ function getSideVector() {
   return playerDirection;
 }
 
-
+// ================== LANZAR PELOTAS ==================
 function throwBall() {
   const sphere = spheres[sphereIdx];
 
   camera.getWorldDirection(playerDirection);
 
-  sphere.collider.center.copy(playerCollider.end).addScaledVector(playerDirection, 1.5);
+  sphere.collider.center
+    .copy(playerCollider.end)
+    .addScaledVector(playerDirection, 1.5);
 
   const impulse = 15 + 30 * (1 - Math.exp((mouseTime - performance.now()) * 0.001));
 
@@ -260,10 +299,13 @@ function updateSpheres(deltaTime) {
     const result = worldOctree.sphereIntersect(sphere.collider);
 
     if (result) {
-      sphere.velocity.addScaledVector(result.normal, -result.normal.dot(sphere.velocity) * 1.5);
+      sphere.velocity.addScaledVector(
+        result.normal,
+        -result.normal.dot(sphere.velocity) * 1.5
+      );
       sphere.collider.center.add(result.normal.multiplyScalar(result.depth));
     } else {
-      sphere.velocity.y -= 25 * deltaTime;
+      sphere.velocity.y -= GRAVITY * deltaTime;
     }
 
     const damping = Math.exp(-1.5 * deltaTime) - 1;
@@ -275,13 +317,29 @@ function updateSpheres(deltaTime) {
   spheresCollisions();
 }
 
-// ===== ANIMACIÓN =====
-function animate() {
-  const deltaTime = Math.min(0.05, clock.getDelta());
+// ================== RESET SI CAE FUERA ==================
+function teleportPlayerIfOob() {
+  if (camera.position.y <= -20) {
+    playerCollider.start.set(0, 0.35, 8);
+    playerCollider.end.set(0, 1.35, 8);
+    playerCollider.radius = 0.35;
 
-  controls(deltaTime);
-  updatePlayer(deltaTime);
-  updateSpheres(deltaTime);
+    camera.position.copy(playerCollider.end);
+    camera.rotation.set(0, 0, 0);
+    playerVelocity.set(0, 0, 0);
+  }
+}
+
+// ================== ANIMACIÓN ==================
+function animate() {
+  const deltaTime = Math.min(0.05, clock.getDelta()) / STEPS_PER_FRAME;
+
+  for (let i = 0; i < STEPS_PER_FRAME; i++) {
+    controls(deltaTime);
+    updatePlayer(deltaTime);
+    updateSpheres(deltaTime);
+    teleportPlayerIfOob();
+  }
 
   renderer.render(scene, camera);
   stats.update();
@@ -291,7 +349,7 @@ function animate() {
 
 animate();
 
-// ===== RESIZE =====
+// ================== RESIZE ==================
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
