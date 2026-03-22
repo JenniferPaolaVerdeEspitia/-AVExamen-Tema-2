@@ -1,56 +1,133 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-<meta charset="utf-8">
-<title>three.js - games_fps</title>
+  <meta charset="utf-8">
+  <title>Juego de Penales 3D - Three.js</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
 
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="data:,">
-
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/"
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/"
+    }
   }
-}
-</script>
+  </script>
 
-<style>
-body {
-  margin: 0;
-  overflow: hidden;
-  font-family: Monospace;
-  background: #000;
-  color: #fff;
-}
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #000;
+      color: #fff;
+    }
 
-#info {
-  position: absolute;
-  top: 10px;
-  width: 100%;
-  text-align: center;
-  z-index: 100;
-  user-select: none;
-  pointer-events: none;
-}
+    #hud {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.55);
+      padding: 12px 16px;
+      border-radius: 12px;
+      min-width: 220px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 4px 18px rgba(0,0,0,.3);
+    }
 
-a {
-  color: #fff;
-}
-</style>
+    #hud h2 {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+      color: #7ee0ff;
+    }
 
+    #hud p {
+      margin: 4px 0;
+      font-size: 14px;
+    }
+
+    #message {
+      position: absolute;
+      top: 20px;
+      width: 100%;
+      text-align: center;
+      z-index: 100;
+      font-size: 24px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0,0,0,.8);
+      pointer-events: none;
+    }
+
+    #crosshair {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      margin-left: -9px;
+      margin-top: -9px;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #crosshair::before,
+    #crosshair::after {
+      content: "";
+      position: absolute;
+      background: white;
+    }
+
+    #crosshair::before {
+      left: 8px;
+      top: 0;
+      width: 2px;
+      height: 18px;
+    }
+
+    #crosshair::after {
+      top: 8px;
+      left: 0;
+      width: 18px;
+      height: 2px;
+    }
+
+    #help {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      z-index: 100;
+      background: rgba(0,0,0,.45);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
 </head>
-
 <body>
 
-<div id="info">
-Futsal Court FPS Demo<br>
-MOUSE para mirar y lanzar pelotas<br>
-WASD mover · SPACE saltar
-</div>
+  <div id="message">Haz clic para comenzar</div>
 
-<script type="module" src="./main.js"></script>
+  <div id="hud">
+    <h2>Juego de Penales 3D</h2>
+    <p><strong>Nivel:</strong> <span id="level">1</span></p>
+    <p><strong>Tiempo:</strong> <span id="time">60</span>s</p>
+    <p><strong>Tiros:</strong> <span id="shots">15</span></p>
+    <p><strong>Goles:</strong> <span id="goals">0</span></p>
+    <p><strong>Meta:</strong> <span id="goalTarget">2</span></p>
+  </div>
 
+  <div id="crosshair"></div>
+
+  <div id="help">
+    Mouse: apuntar<br>
+    Click izquierdo: disparar<br>
+    WASD: mover al jugador<br>
+    Shift: correr
+  </div>
+
+  <script type="module" src="./main.js"></script>
 </body>
 </html>

@@ -131,7 +131,7 @@ document.body.addEventListener('mousemove', (event) => {
 
 // ================== CARGA DEL ESCENARIO ==================
 const loader = new GLTFLoader();
-const MODEL_PATH = './models/futsal_court/scene.gltf';
+const MODEL_PATH = './models/scene.gltf';
 
 loader.load(
   MODEL_PATH,
