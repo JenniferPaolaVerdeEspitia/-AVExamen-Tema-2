@@ -20,27 +20,24 @@ const GOALKEEPER_CATCH_1_PATH = './goalkeeper/Catch1.fbx';
 const GOALKEEPER_CATCH_2_PATH = './goalkeeper/Catch2.fbx';
 const GOALKEEPER_DIVE_PATH = './goalkeeper/Dive.fbx';
 
-// Ajusta estos valores si el modelo queda girado raro
 const PLAYER_VISUAL_ROT_Y = Math.PI;
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 
-// Escalas Mixamo
-const PLAYER_SCALE = 0.01;
-const GOALKEEPER_SCALE = 0.01;
+const PLAYER_SCALE = 0.0125;
+const GOALKEEPER_SCALE = 0.0125;
 
 // Posiciones base
 const PLAYER_START = new THREE.Vector3(0, 0.35, 10.5);
-const BALL_OFFSET_FROM_PLAYER = new THREE.Vector3(0, 0.25, -1.15);
+const BALL_OFFSET_FROM_PLAYER = new THREE.Vector3(0, 0, 0);
 const GOALKEEPER_HOME = new THREE.Vector3(0, 0.0, -18.2);
 
 // Caja de gol
-// Si el gol no detecta bien, ajusta estos números
 const GOAL_MIN_X = -1.45;
 const GOAL_MAX_X = 1.45;
 const GOAL_MIN_Y = 0.10;
 const GOAL_MAX_Y = 2.45;
 const GOAL_LINE_Z = -18.75;
-const GOAL_PLANE_Z = -18.60; // para apuntar
+const GOAL_PLANE_Z = -18.60;
 
 // Física
 const GRAVITY = 24;
@@ -62,10 +59,10 @@ const LOOK_HEIGHT = 1.4;
 const MIN_PITCH = -0.45;
 const MAX_PITCH = 0.35;
 
-// Movimiento permitido del jugador en zona de tiro
-const PLAYER_MIN_X = -5.0;
-const PLAYER_MAX_X = 5.0;
-const PLAYER_MIN_Z = 5.2;
+// Movimiento permitido del jugador
+const PLAYER_MIN_X = -9.0;
+const PLAYER_MAX_X = 9.0;
+const PLAYER_MIN_Z = -8.0;
 const PLAYER_MAX_Z = 13.5;
 
 // Juego
@@ -133,6 +130,10 @@ dirLight.shadow.camera.top = 50;
 dirLight.shadow.camera.bottom = -50;
 dirLight.shadow.mapSize.set(2048, 2048);
 scene.add(dirLight);
+
+const playerLight = new THREE.PointLight(0xffffff, 1.2, 18);
+playerLight.position.set(0, 6, 8);
+scene.add(playerLight);
 
 // ======================================================
 // CARGADORES
@@ -219,6 +220,11 @@ let shotResolved = false;
 let currentShotWasGoal = false;
 let currentShotTarget = new THREE.Vector3();
 let playerCanShoot = true;
+
+let pendingShot = false;
+let pendingShotTimer = 0;
+let pendingShotDirection = new THREE.Vector3();
+let pendingShotPower = 0;
 
 // IA del portero
 const keeperState = {
@@ -312,15 +318,49 @@ function createBallMesh() {
   ball.mesh = group;
 }
 
-function setShadows(object) {
+function setShadows(object, tint = null, forceSolid = false) {
   object.traverse((child) => {
-    if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
+    if (!child.isMesh) return;
 
-      if (child.material) {
-        child.material.side = THREE.FrontSide;
+    child.castShadow = true;
+    child.receiveShadow = true;
+
+    const applyMaterialFix = (mat) => {
+      if (!mat) return;
+
+      mat.side = THREE.FrontSide;
+      mat.transparent = false;
+      mat.opacity = 1;
+      mat.alphaTest = 0;
+      mat.depthWrite = true;
+      mat.depthTest = true;
+
+      if (tint && mat.color) {
+        mat.color.multiply(tint);
       }
+
+      if (forceSolid) {
+        const solidMat = new THREE.MeshStandardMaterial({
+          map: mat.map || null,
+          color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+          roughness: 0.85,
+          metalness: 0.0
+        });
+
+        solidMat.transparent = false;
+        solidMat.opacity = 1;
+        solidMat.side = THREE.FrontSide;
+        solidMat.depthWrite = true;
+        child.material = solidMat;
+      } else {
+        mat.needsUpdate = true;
+      }
+    };
+
+    if (Array.isArray(child.material)) {
+      child.material.forEach(applyMaterialFix);
+    } else {
+      applyMaterialFix(child.material);
     }
   });
 }
@@ -381,10 +421,14 @@ function resetPlayerPosition() {
   playerVelocity.set(0, 0, 0);
 }
 
-function syncPlayerVisual(deltaTime) {
-  if (!playerRoot) return;
+function syncPlayerVisual() {
+  if (!playerRoot || !playerModel) return;
 
-  playerRoot.position.copy(playerCollider.start);
+  playerRoot.position.set(
+    playerCollider.start.x,
+    playerCollider.start.y - 0.35,
+    playerCollider.start.z
+  );
 
   const targetRot = playerFacing + PLAYER_VISUAL_ROT_Y;
   playerRoot.rotation.y = THREE.MathUtils.lerp(playerRoot.rotation.y, targetRot, 0.15);
@@ -392,7 +436,6 @@ function syncPlayerVisual(deltaTime) {
   const moving = playerMoveBlend;
   const running = playerRunBlend;
 
-  // Simulación visual básica de caminar/correr sin animaciones FBX
   const bob = Math.sin(performance.now() * 0.01 * (running > 0.5 ? 2.2 : 1.4)) * 0.02 * moving;
   playerModel.position.y = bob;
   playerModel.rotation.z = Math.sin(performance.now() * 0.012) * 0.015 * moving;
@@ -423,16 +466,28 @@ function updateCamera() {
 
   const lookForward = new THREE.Vector3(0, 0.15, -8).applyQuaternion(quat);
   camera.lookAt(lookTarget.clone().add(lookForward));
+
+  playerLight.position.set(
+    playerRoot.position.x,
+    playerRoot.position.y + 5,
+    playerRoot.position.z + 4
+  );
 }
 
 function getBallStartPosition() {
-  const offset = BALL_OFFSET_FROM_PLAYER.clone();
-  offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+  const goalCenter = new THREE.Vector3(0, 0.24, GOAL_PLANE_Z);
+  const playerPos = new THREE.Vector3(
+    playerCollider.start.x,
+    0.24,
+    playerCollider.start.z
+  );
+
+  const toGoal = goalCenter.clone().sub(playerPos).setY(0).normalize();
 
   return new THREE.Vector3(
-    playerCollider.start.x + offset.x,
-    Math.max(0.24, playerCollider.start.y + offset.y),
-    playerCollider.start.z + offset.z
+    playerPos.x + toGoal.x * 0.55,
+    BALL_RADIUS + 0.02,
+    playerPos.z + toGoal.z * 0.55
   );
 }
 
@@ -461,6 +516,11 @@ function resetBallForNextShot() {
   keeperState.returnHome = true;
   keeperState.targetX = 0;
   keeperState.cooldown = 0;
+
+  pendingShot = false;
+  pendingShotTimer = 0;
+  pendingShotDirection.set(0, 0, 0);
+  pendingShotPower = 0;
 }
 
 function hideBall() {
@@ -761,6 +821,7 @@ function advanceLevel() {
 // DISPARO
 // ======================================================
 function shootBall() {
+  if (!ball.mesh) return;
   if (!gameStarted || gamePaused || !playerCanShoot || !ball.active || ball.kicked) return;
   if (shotsLeft <= 0 || timeLeft <= 0) return;
 
@@ -768,23 +829,41 @@ function shootBall() {
   shotsLeft -= 1;
   updateHUD();
 
-  currentShotTarget.copy(getShotTargetPoint());
-
   const startPos = getBallStartPosition();
   ball.collider.center.copy(startPos);
   ball.mesh.position.copy(startPos);
 
+  currentShotTarget.copy(getShotTargetPoint());
+
   const dir = currentShotTarget.clone().sub(startPos).normalize();
   const power = BALL_BASE_POWER + level * BALL_POWER_PER_LEVEL;
-
-  ball.velocity.copy(dir.multiplyScalar(power));
-  ball.kicked = true;
-  ball.timeSinceShot = 0;
 
   playPlayerAction('kick');
   triggerGoalkeeperReaction(currentShotTarget);
 
+  pendingShot = true;
+  pendingShotTimer = 0.02;
+  pendingShotDirection.copy(dir);
+  pendingShotPower = power;
+
   setMessage('¡Disparo!');
+}
+
+function updatePendingShot(deltaTime) {
+  if (!pendingShot || !ball.mesh) return;
+
+  const holdPos = getBallStartPosition();
+  ball.collider.center.copy(holdPos);
+  ball.mesh.position.copy(holdPos);
+
+  pendingShotTimer -= deltaTime;
+
+  if (pendingShotTimer <= 0) {
+    ball.velocity.copy(pendingShotDirection).multiplyScalar(pendingShotPower);
+    ball.kicked = true;
+    ball.timeSinceShot = 0;
+    pendingShot = false;
+  }
 }
 
 // ======================================================
@@ -794,15 +873,17 @@ function updateBall(deltaTime) {
   if (!ball.active || !ball.mesh) return;
 
   if (!ball.kicked) {
-    const followPos = getBallStartPosition();
-    ball.collider.center.lerp(followPos, 0.25);
-    ball.mesh.position.copy(ball.collider.center);
-    ball.mesh.rotation.y += deltaTime * 1.0;
+    if (!pendingShot) {
+      const followPos = getBallStartPosition();
+      ball.collider.center.copy(followPos);
+      ball.mesh.position.copy(ball.collider.center);
+    }
+
+    ball.mesh.rotation.y += deltaTime * 0.2;
     return;
   }
 
   ball.timeSinceShot += deltaTime;
-
   ball.collider.center.addScaledVector(ball.velocity, deltaTime);
 
   const speed = ball.velocity.length();
@@ -870,7 +951,7 @@ async function loadPlayer() {
   playerModel.scale.setScalar(PLAYER_SCALE);
   playerModel.position.set(0, 0, 0);
   playerModel.rotation.y = 0;
-  setShadows(playerModel);
+  setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
   playerRoot.add(playerModel);
 
   playerMixer = new THREE.AnimationMixer(playerModel);
@@ -887,7 +968,7 @@ async function loadPlayer() {
   }
 
   resetPlayerPosition();
-  syncPlayerVisual(0);
+  syncPlayerVisual();
 }
 
 async function loadGoalkeeper() {
@@ -898,7 +979,7 @@ async function loadGoalkeeper() {
   goalkeeperModel = await loadFBX(GOALKEEPER_MODEL_PATH);
   goalkeeperModel.scale.setScalar(GOALKEEPER_SCALE);
   goalkeeperModel.position.set(0, 0, 0);
-  setShadows(goalkeeperModel);
+  setShadows(goalkeeperModel, new THREE.Color(1.2, 1.2, 1.2), false);
   goalkeeperRoot.add(goalkeeperModel);
 
   goalkeeperMixer = new THREE.AnimationMixer(goalkeeperModel);
@@ -966,7 +1047,6 @@ document.addEventListener('mousedown', async () => {
         gamePaused = false;
         startLevel(1);
       }
-
     } catch (error) {
       console.warn('No se pudo activar el pointer lock:', error);
     }
@@ -1057,12 +1137,13 @@ function animate() {
       controls(subDt);
       updatePlayer(subDt);
       teleportPlayerIfOob();
+      updatePendingShot(subDt);
       updateBall(subDt);
       updateGoalkeeper(subDt);
     }
   }
 
-  syncPlayerVisual(dt);
+  syncPlayerVisual();
   updateCamera();
   updateTimers(dt);
   updateShotReset(dt);
@@ -1088,7 +1169,7 @@ window.addEventListener('resize', () => {
     await loadGame();
     animate();
   } catch (error) {
-    console.error(error);
-    setMessage('Error cargando el juego. Revisa rutas y nombres de archivos.');
+    console.error('Error cargando el juego:', error);
+    setMessage('Error cargando el juego. Revisa rutas y nombres exactos de archivos FBX.');
   }
 })();
