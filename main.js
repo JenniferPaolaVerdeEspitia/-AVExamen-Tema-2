@@ -429,26 +429,113 @@ function applyStandingPose() {
 
     const name = child.name.toLowerCase();
 
+    // Brazos hacia abajo
     if (name.includes('leftarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.05, 0.12);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.18, 0.12);
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55, 0.14);
+      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.14);
     }
 
     if (name.includes('rightarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.05, 0.12);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.18, 0.12);
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55, 0.14);
+      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.14);
     }
 
     if (name.includes('leftforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.12, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.12);
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.18, 0.14);
+      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.02, 0.14);
     }
 
     if (name.includes('rightforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.12, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.12);
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.18, 0.14);
+      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.02, 0.14);
+    }
+
+    // Piernas ligeramente abiertas
+    if (name.includes('leftupleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.03, 0.14);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.14);
+    }
+
+    if (name.includes('rightupleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.03, 0.14);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.14);
+    }
+
+    if (name.includes('leftleg') && !name.includes('upleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.02, 0.14);
+    }
+
+    if (name.includes('rightleg') && !name.includes('upleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.02, 0.14);
+    }
+  });
+}
+
+function applyRunPose(deltaTime) {
+  if (!playerModel) return;
+
+  const moving = playerMoveBlend;
+  const running = playerRunBlend;
+  const motion = Math.max(moving, running);
+
+  if (motion <= 0.02) return;
+
+  const t = performance.now() * 0.01 * (running > 0.5 ? 1.45 : 0.9);
+  const legSwing = Math.sin(t) * (running > 0.5 ? 0.95 : 0.45) * motion;
+  const armSwing = Math.sin(t) * (running > 0.5 ? 0.75 : 0.35) * motion;
+  const kneeBend = Math.abs(Math.sin(t)) * (running > 0.5 ? 0.55 : 0.22) * motion;
+
+  playerModel.traverse((child) => {
+    if (!child.isBone) return;
+
+    const name = child.name.toLowerCase();
+
+    if (name.includes('leftarm') && !name.includes('forearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 + armSwing, 0.18);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.18);
+    }
+
+    if (name.includes('rightarm') && !name.includes('forearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 - armSwing, 0.18);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.18);
+    }
+
+    if (name.includes('leftforearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
+    }
+
+    if (name.includes('rightforearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
+    }
+
+    if (name.includes('leftupleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, legSwing, 0.2);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.2);
+    }
+
+    if (name.includes('rightupleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -legSwing, 0.2);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.2);
+    }
+
+    if (name.includes('leftleg') && !name.includes('upleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(
+        child.rotation.x,
+        0.04 + Math.max(0, -legSwing) * kneeBend,
+        0.2
+      );
+    }
+
+    if (name.includes('rightleg') && !name.includes('upleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(
+        child.rotation.x,
+        0.04 + Math.max(0, legSwing) * kneeBend,
+        0.2
+      );
     }
   });
 }
@@ -524,9 +611,9 @@ function syncPlayerVisual() {
   const moving = playerMoveBlend;
   const running = playerRunBlend;
 
-  const bob = Math.sin(performance.now() * 0.012 * (running > 0.5 ? 2.6 : 1.5)) * 0.012 * moving;
+  const bob = Math.sin(performance.now() * 0.016 * (running > 0.5 ? 3.0 : 1.8)) * 0.02 * moving;
   playerModel.position.y = bob;
-  playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.006 * moving;
+  playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.004 * moving;
   playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
 }
 
@@ -576,9 +663,9 @@ function getBallStartPosition() {
   );
 
   return new THREE.Vector3(
-    base.x + forward.x * 0.10,
+    base.x + forward.x * 0.06,
     BALL_RADIUS - 0.01,
-    base.z + forward.z * 0.10
+    base.z + forward.z * 0.06
   );
 }
 
@@ -1231,6 +1318,7 @@ function animate() {
 
   if (playerModel && !pendingShot && kickLockTimer <= 0) {
     applyStandingPose();
+    applyRunPose(dt);
   }
 
   if (kickLockTimer > 0) {
