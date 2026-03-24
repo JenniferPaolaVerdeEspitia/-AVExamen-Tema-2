@@ -21,9 +21,31 @@ const GOALKEEPER_CATCH_1_PATH = './goalkeeper/Catch1.fbx';
 const GOALKEEPER_CATCH_2_PATH = './goalkeeper/Catch2.fbx';
 const GOALKEEPER_DIVE_PATH = './goalkeeper/Dive.fbx';
 
+// ======================================================
+// AUDIO
+// ======================================================
+const AUDIO_FILES = {
+  fail: './audio/fail.wav',
+  goal: './audio/goal.wav',
+  save: './audio/save.wav',
+  kick: './audio/kick.wav'
+};
+
 const PLAYER_VISUAL_ROT_Y = Math.PI;
 const PLAYER_VISUAL_ROT_X = 0;
-const PLAYER_MODEL_Y_OFFSET = -0.34;
+
+// Ajustes visuales del jugador
+const PLAYER_MODEL_Y_OFFSET = -0.68;
+const PLAYER_ROOT_Y_OFFSET = -0.12;
+
+// Balón frente al jugador
+const BALL_RADIUS = 0.16;
+const BALL_FRONT_OFFSET = 0.82;
+const BALL_SIDE_OFFSET = 0.0;
+const BALL_START_Y = BALL_RADIUS - 0.02;
+
+// Momento exacto del contacto de la patada
+const KICK_CONTACT_TIME = 0.16;
 
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 const GOALKEEPER_SCALE = 0.0125;
@@ -48,7 +70,6 @@ const PLAYER_AIR_SPEED = 4.5;
 const PLAYER_JUMP_SPEED = 10.5;
 const STEPS_PER_FRAME = 5;
 
-const BALL_RADIUS = 0.16;
 const BALL_BASE_POWER = 21;
 const BALL_POWER_PER_LEVEL = 0.9;
 
@@ -194,7 +215,25 @@ let goalkeeperActions = {
 };
 let goalkeeperCurrentAction = null;
 
-// Estado visual simulado del jugador
+// ======================================================
+// AUDIO / FX / AIM GUIDE
+// ======================================================
+const audio = {
+  kick: null,
+  goal: null,
+  save: null,
+  miss: null,
+  enabled: true,
+  unlocked: false
+};
+
+let aimDots = [];
+let aimArrow = null;
+let kickFlash = null;
+let kickRing = null;
+let trailParticles = [];
+
+// Estado visual
 let playerMoveBlend = 0;
 let playerRunBlend = 0;
 let playerFacing = 0;
@@ -266,7 +305,6 @@ function getTargetGoalsForLevel(currentLevel) {
 function clampPlayerArea() {
   playerCollider.start.x = THREE.MathUtils.clamp(playerCollider.start.x, PLAYER_MIN_X, PLAYER_MAX_X);
   playerCollider.end.x = THREE.MathUtils.clamp(playerCollider.end.x, PLAYER_MIN_X, PLAYER_MAX_X);
-
   playerCollider.start.z = THREE.MathUtils.clamp(playerCollider.start.z, PLAYER_MIN_Z, PLAYER_MAX_Z);
   playerCollider.end.z = THREE.MathUtils.clamp(playerCollider.end.z, PLAYER_MIN_Z, PLAYER_MAX_Z);
 }
@@ -375,6 +413,226 @@ function createBallMesh() {
   ball.mesh = group;
 }
 
+function createAudio(path, volume = 1) {
+  const a = new Audio(path);
+  a.preload = 'auto';
+  a.volume = volume;
+  a.load();
+
+  a.addEventListener('canplaythrough', () => {
+    console.log(`Audio cargado correctamente: ${path}`);
+  });
+
+  a.addEventListener('error', (e) => {
+    console.error(`Error cargando audio: ${path}`, e);
+  });
+
+  return a;
+}
+
+function initAudio() {
+  audio.kick = createAudio(AUDIO_FILES.kick, 0.55);
+  audio.goal = createAudio(AUDIO_FILES.goal, 0.75);
+  audio.save = createAudio(AUDIO_FILES.save, 0.65);
+  audio.miss = createAudio(AUDIO_FILES.miss, 0.55);
+}
+
+
+async function unlockAudio() {
+  if (audio.unlocked) return;
+
+  const audios = [audio.kick, audio.goal, audio.save, audio.miss].filter(Boolean);
+
+  for (const a of audios) {
+    try {
+      a.muted = true;
+      a.currentTime = 0;
+      await a.play();
+      a.pause();
+      a.currentTime = 0;
+      a.muted = false;
+    } catch (err) {
+      console.warn('No se pudo desbloquear un audio:', err);
+    }
+  }
+
+  audio.unlocked = true;
+  console.log('Audio desbloqueado');
+}
+
+function playSound(name) {
+  if (!audio.enabled || !audio[name]) return;
+
+  const s = audio[name];
+
+  try {
+    s.pause();
+    s.currentTime = 0;
+    s.play().catch((err) => {
+      console.warn(`No se pudo reproducir ${name}:`, err);
+    });
+  } catch (err) {
+    console.warn(`Error al reproducir ${name}:`, err);
+  }
+}
+
+function createAimGuide() {
+  const dotGeo = new THREE.SphereGeometry(0.055, 10, 10);
+  const dotMat = new THREE.MeshBasicMaterial({
+    color: 0xffe14d,
+    transparent: true,
+    opacity: 0.95
+  });
+
+  for (let i = 0; i < 14; i++) {
+    const dot = new THREE.Mesh(dotGeo, dotMat.clone());
+    dot.visible = false;
+    scene.add(dot);
+    aimDots.push(dot);
+  }
+
+  const arrowGeo = new THREE.ConeGeometry(0.12, 0.28, 12);
+  const arrowMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.95
+  });
+
+  aimArrow = new THREE.Mesh(arrowGeo, arrowMat);
+  aimArrow.visible = false;
+  scene.add(aimArrow);
+}
+
+function updateAimGuide() {
+  if (!ball.mesh || !ball.active || ball.kicked || pendingShot || gamePaused || !gameStarted) {
+    for (const dot of aimDots) dot.visible = false;
+    if (aimArrow) aimArrow.visible = false;
+    return;
+  }
+
+  const start = getBallStartPosition();
+  const end = getShotTargetPoint();
+
+  const mid = start.clone().lerp(end, 0.5);
+  mid.y += 1.6;
+
+  const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+  const points = curve.getPoints(aimDots.length);
+
+  for (let i = 0; i < aimDots.length; i++) {
+    const dot = aimDots[i];
+    const p = points[i];
+    dot.position.copy(p);
+    dot.position.y = Math.max(0.05, dot.position.y);
+    dot.visible = true;
+    dot.scale.setScalar(1 - i * 0.035);
+    dot.material.opacity = Math.max(0.18, 0.95 - i * 0.05);
+  }
+
+  if (aimArrow) {
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    const dir = last.clone().sub(prev).normalize();
+
+    aimArrow.position.copy(last);
+    aimArrow.position.y += 0.1;
+    aimArrow.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      dir.clone().normalize()
+    );
+    aimArrow.visible = true;
+  }
+}
+
+function createKickEffects() {
+  const flashGeo = new THREE.SphereGeometry(0.22, 16, 16);
+  const flashMat = new THREE.MeshBasicMaterial({
+    color: 0xfff2a8,
+    transparent: true,
+    opacity: 0
+  });
+  kickFlash = new THREE.Mesh(flashGeo, flashMat);
+  kickFlash.visible = false;
+  scene.add(kickFlash);
+
+  const ringGeo = new THREE.RingGeometry(0.14, 0.22, 24);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0
+  });
+  kickRing = new THREE.Mesh(ringGeo, ringMat);
+  kickRing.rotation.x = -Math.PI / 2;
+  kickRing.visible = false;
+  scene.add(kickRing);
+}
+
+function triggerKickEffect(position) {
+  if (!kickFlash || !kickRing) return;
+
+  kickFlash.position.copy(position);
+  kickFlash.visible = true;
+  kickFlash.material.opacity = 0.9;
+  kickFlash.scale.setScalar(1);
+
+  kickRing.position.copy(position);
+  kickRing.position.y += 0.02;
+  kickRing.visible = true;
+  kickRing.material.opacity = 0.9;
+  kickRing.scale.setScalar(1);
+}
+
+function spawnTrailParticle(position) {
+  const geo = new THREE.SphereGeometry(0.045, 8, 8);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffd84d,
+    transparent: true,
+    opacity: 0.9
+  });
+
+  const particle = new THREE.Mesh(geo, mat);
+  particle.position.copy(position);
+  particle.position.y += 0.02;
+  particle.userData.life = 0.35;
+  particle.userData.maxLife = 0.35;
+  scene.add(particle);
+  trailParticles.push(particle);
+}
+
+function updateEffects(deltaTime) {
+  if (kickFlash && kickFlash.visible) {
+    kickFlash.scale.multiplyScalar(1.12);
+    kickFlash.material.opacity -= deltaTime * 4.0;
+    if (kickFlash.material.opacity <= 0) {
+      kickFlash.visible = false;
+    }
+  }
+
+  if (kickRing && kickRing.visible) {
+    kickRing.scale.multiplyScalar(1.18);
+    kickRing.material.opacity -= deltaTime * 3.5;
+    if (kickRing.material.opacity <= 0) {
+      kickRing.visible = false;
+    }
+  }
+
+  for (let i = trailParticles.length - 1; i >= 0; i--) {
+    const p = trailParticles[i];
+    p.userData.life -= deltaTime;
+    p.position.y += deltaTime * 0.15;
+    p.scale.multiplyScalar(0.97);
+    p.material.opacity = Math.max(0, p.userData.life / p.userData.maxLife);
+
+    if (p.userData.life <= 0) {
+      scene.remove(p);
+      p.geometry.dispose();
+      p.material.dispose();
+      trailParticles.splice(i, 1);
+    }
+  }
+}
+
 function setShadows(object, tint = null, forceSolid = false) {
   object.traverse((child) => {
     if (!child.isMesh) return;
@@ -422,7 +680,7 @@ function setShadows(object, tint = null, forceSolid = false) {
   });
 }
 
-function normalizeModelToGround(object3D, desiredHeight = 1.8) {
+function normalizeModelToGround(object3D, desiredHeight = 1.66) {
   const initialBox = new THREE.Box3().setFromObject(object3D);
   const initialSize = new THREE.Vector3();
   initialBox.getSize(initialSize);
@@ -547,20 +805,19 @@ function syncPlayerVisual() {
 
   playerRoot.position.set(
     playerCollider.start.x,
-    playerCollider.start.y,
+    playerCollider.start.y + PLAYER_ROOT_Y_OFFSET,
     playerCollider.start.z
   );
 
   const targetRot = playerFacing + PLAYER_VISUAL_ROT_Y;
-  playerRoot.rotation.y = THREE.MathUtils.lerp(playerRoot.rotation.y, targetRot, 0.15);
+  playerRoot.rotation.y = THREE.MathUtils.lerp(playerRoot.rotation.y, targetRot, 0.18);
 
   const moving = playerMoveBlend;
-  const running = playerRunBlend;
+  const bob = Math.sin(performance.now() * 0.012) * 0.008 * moving;
 
-  const bob = Math.sin(performance.now() * 0.016 * (running > 0.5 ? 3.0 : 1.8)) * 0.02 * moving;
   playerModel.position.y = playerModelBaseY + PLAYER_MODEL_Y_OFFSET + bob;
-  playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.004 * moving;
   playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
+  playerModel.rotation.z = 0;
 }
 
 function syncGoalkeeperVisual() {
@@ -596,23 +853,26 @@ function updateCamera() {
 }
 
 function getBallStartPosition() {
-  const forward = new THREE.Vector3(
-    Math.sin(playerFacing),
-    0,
-    -Math.cos(playerFacing)
-  ).normalize();
+  if (!playerRoot) {
+    return new THREE.Vector3(
+      playerCollider.start.x,
+      BALL_START_Y,
+      playerCollider.start.z - BALL_FRONT_OFFSET
+    );
+  }
+
+  const visualForward = new THREE.Vector3(0, 0, 1).applyQuaternion(playerRoot.quaternion).normalize();
+  const visualRight = new THREE.Vector3(1, 0, 0).applyQuaternion(playerRoot.quaternion).normalize();
 
   const base = new THREE.Vector3(
     playerCollider.start.x,
-    0,
+    BALL_START_Y,
     playerCollider.start.z
   );
 
-  return new THREE.Vector3(
-    base.x + forward.x * 0.06,
-    BALL_RADIUS - 0.01,
-    base.z + forward.z * 0.06
-  );
+  return base
+    .add(visualForward.multiplyScalar(BALL_FRONT_OFFSET))
+    .add(visualRight.multiplyScalar(BALL_SIDE_OFFSET));
 }
 
 function resetBallForNextShot() {
@@ -685,16 +945,10 @@ function getShotTargetPoint() {
 function updatePlayerAnimationState() {
   if (!playerModel) return;
 
-  const moving = playerMoveBlend > 0.08;
   const blockedByShot = kickLockTimer > 0 || pendingShot || !!playerCurrentAction;
-
   if (blockedByShot) return;
 
-  if (moving) {
-    stopBasePlayerAction(0.10);
-  } else {
-    resumeBasePlayerAction(0.12);
-  }
+  resumeBasePlayerAction(0.08);
 }
 
 // ======================================================
@@ -813,7 +1067,11 @@ function triggerGoalkeeperReaction(targetPoint) {
     guessedX = THREE.MathUtils.clamp(targetX + error, -1.2, 1.2);
   } else {
     const wrongSide = targetX >= 0 ? -1 : 1;
-    guessedX = THREE.MathUtils.clamp(wrongSide * THREE.MathUtils.randFloat(0.35, 1.15), -1.2, 1.2);
+    guessedX = THREE.MathUtils.clamp(
+      wrongSide * THREE.MathUtils.randFloat(0.35, 1.15),
+      -1.2,
+      1.2
+    );
   }
 
   keeperState.targetX = guessedX;
@@ -838,10 +1096,9 @@ function updateGoalkeeper(deltaTime) {
   if (!goalkeeperRoot) return;
 
   if (keeperState.reacting) {
-    const targetPosX = keeperState.targetX;
     goalkeeperRoot.position.x = THREE.MathUtils.lerp(
       goalkeeperRoot.position.x,
-      targetPosX,
+      keeperState.targetX,
       deltaTime * keeperState.moveSpeed
     );
 
@@ -888,6 +1145,9 @@ function saveBall() {
   currentShotWasGoal = false;
   setMessage('¡ATAJADA!');
 
+  console.log('Sonido save');
+  playSound('save');
+
   const awayDir = new THREE.Vector3(
     ball.collider.center.x - goalkeeperRoot.position.x,
     0.35,
@@ -910,6 +1170,9 @@ function registerGoal() {
   updateHUD();
   setMessage('¡GOOOOL!');
 
+  console.log('Sonido goal');
+  playSound('goal');
+
   playPlayerAction('celebrate');
   resetShotTimer = 1.8;
 
@@ -924,6 +1187,10 @@ function registerMiss(text = '¡FALLASTE!') {
   shotResolved = true;
   currentShotWasGoal = false;
   setMessage(text);
+
+  console.log('Sonido miss');
+  playSound('miss');
+
   resetShotTimer = 1.4;
 }
 
@@ -997,13 +1264,22 @@ function shootBall() {
   const dir = currentShotTarget.clone().sub(startPos).normalize();
   const power = BALL_BASE_POWER + level * BALL_POWER_PER_LEVEL;
 
-  kickLockTimer = 0.42;
+  kickLockTimer = 0.34;
+
+  if (playerActions.kick) {
+    playerActions.kick.timeScale = 1.15;
+  }
 
   playPlayerAction('kick');
   triggerGoalkeeperReaction(currentShotTarget);
 
+  console.log('Sonido kick');
+  playSound('kick');
+
+  triggerKickEffect(startPos);
+
   pendingShot = true;
-  pendingShotTimer = 0.28;
+  pendingShotTimer = KICK_CONTACT_TIME;
   pendingShotDirection.copy(dir);
   pendingShotPower = power;
 
@@ -1069,6 +1345,12 @@ function updateBall(deltaTime) {
   ball.velocity.addScaledVector(ball.velocity, damping);
   ball.mesh.position.copy(ball.collider.center);
 
+  if (ball.kicked && ball.velocity.length() > 6) {
+    if (Math.random() < 0.55) {
+      spawnTrailParticle(ball.collider.center.clone());
+    }
+  }
+
   if (!shotResolved && goalkeeperCanSaveBall()) {
     saveBall();
   }
@@ -1113,7 +1395,7 @@ async function loadPlayer() {
 
   setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
 
-  const result = normalizeModelToGround(playerModel, 1.8);
+  const result = normalizeModelToGround(playerModel, 1.66);
   playerModelBaseY = playerModel.position.y;
 
   playerRoot.add(playerModel);
@@ -1207,11 +1489,16 @@ async function loadGoalkeeper() {
 async function loadGame() {
   setMessage('Cargando cancha, jugador y portero...');
 
+  initAudio();
+
   await loadCourt();
   await loadPlayer();
   await loadGoalkeeper();
 
   createBallMesh();
+  createAimGuide();
+  createKickEffects();
+
   updateHUD();
   resetBallForNextShot();
   updateCamera();
@@ -1239,6 +1526,10 @@ document.addEventListener('mousemove', (event) => {
 });
 
 document.addEventListener('mousedown', async () => {
+  if (!audio.unlocked) {
+    await unlockAudio();
+  }
+
   if (document.pointerLockElement !== document.body) {
     try {
       await document.body.requestPointerLock();
@@ -1323,71 +1614,6 @@ function updateShotReset(deltaTime) {
   }
 }
 
-function applyRunPose(deltaTime) {
-  if (!playerModel) return;
-
-  const moving = playerMoveBlend;
-  const running = playerRunBlend;
-  const motion = Math.max(moving, running);
-
-  if (motion <= 0.02) return;
-
-  const t = performance.now() * 0.01 * (running > 0.5 ? 1.45 : 0.9);
-  const legSwing = Math.sin(t) * (running > 0.5 ? 0.95 : 0.45) * motion;
-  const armSwing = Math.sin(t) * (running > 0.5 ? 0.75 : 0.35) * motion;
-  const kneeBend = Math.abs(Math.sin(t)) * (running > 0.5 ? 0.55 : 0.22) * motion;
-
-  playerModel.traverse((child) => {
-    if (!child.isBone) return;
-
-    const name = child.name.toLowerCase();
-
-    if (name.includes('leftarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 + armSwing, 0.18);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.18);
-    }
-
-    if (name.includes('rightarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 - armSwing, 0.18);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.18);
-    }
-
-    if (name.includes('leftforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
-    }
-
-    if (name.includes('rightforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
-    }
-
-    if (name.includes('leftupleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, legSwing, 0.2);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.2);
-    }
-
-    if (name.includes('rightupleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -legSwing, 0.2);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.2);
-    }
-
-    if (name.includes('leftleg') && !name.includes('upleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(
-        child.rotation.x,
-        0.04 + Math.max(0, -legSwing) * kneeBend,
-        0.2
-      );
-    }
-
-    if (name.includes('rightleg') && !name.includes('upleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(
-        child.rotation.x,
-        0.04 + Math.max(0, legSwing) * kneeBend,
-        0.2
-      );
-    }
-  });
-}
-
 function animate() {
   requestAnimationFrame(animate);
 
@@ -1415,20 +1641,12 @@ function animate() {
 
   updatePlayerAnimationState();
 
-  if (
-    playerModel &&
-    playerMoveBlend > 0.05 &&
-    !pendingShot &&
-    kickLockTimer <= 0 &&
-    !playerCurrentAction
-  ) {
-    applyRunPose(dt);
-  }
-
   syncPlayerVisual();
   updateCamera();
   updateTimers(dt);
   updateShotReset(dt);
+  updateAimGuide();
+  updateEffects(dt);
 
   renderer.render(scene, camera);
   stats.update();
@@ -1452,6 +1670,6 @@ window.addEventListener('resize', () => {
     animate();
   } catch (error) {
     console.error('Error cargando el juego:', error);
-    setMessage('Error cargando el juego. Revisa rutas y nombres exactos de archivos FBX.');
+    setMessage('Error cargando el juego. Revisa rutas y nombres exactos de archivos FBX y MP3.');
   }
 })();
