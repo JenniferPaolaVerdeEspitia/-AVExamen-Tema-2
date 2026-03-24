@@ -21,6 +21,7 @@ const GOALKEEPER_CATCH_2_PATH = './goalkeeper/Catch2.fbx';
 const GOALKEEPER_DIVE_PATH = './goalkeeper/Dive.fbx';
 
 const PLAYER_VISUAL_ROT_Y = Math.PI;
+const PLAYER_VISUAL_ROT_X = 0;
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 
 const PLAYER_SCALE = 0.0125;
@@ -28,7 +29,6 @@ const GOALKEEPER_SCALE = 0.0125;
 
 // Posiciones base
 const PLAYER_START = new THREE.Vector3(0, 0.35, 10.5);
-const BALL_OFFSET_FROM_PLAYER = new THREE.Vector3(0, 0, 0);
 const GOALKEEPER_HOME = new THREE.Vector3(0, 0.0, -18.2);
 
 // Caja de gol
@@ -42,12 +42,12 @@ const GOAL_PLANE_Z = -18.60;
 // Física
 const GRAVITY = 24;
 const PLAYER_SPEED = 7.5;
-const PLAYER_RUN_SPEED = 11.5;
+const PLAYER_RUN_SPEED = 15.5;
 const PLAYER_AIR_SPEED = 4.5;
 const PLAYER_JUMP_SPEED = 10.5;
 const STEPS_PER_FRAME = 5;
 
-const BALL_RADIUS = 0.22;
+const BALL_RADIUS = 0.16;
 const BALL_BASE_POWER = 21;
 const BALL_POWER_PER_LEVEL = 0.9;
 
@@ -225,6 +225,7 @@ let pendingShot = false;
 let pendingShotTimer = 0;
 let pendingShotDirection = new THREE.Vector3();
 let pendingShotPower = 0;
+let kickLockTimer = 0;
 
 // IA del portero
 const keeperState = {
@@ -286,35 +287,87 @@ function isInsideGoal(position) {
   );
 }
 
+function createSoccerBallTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 512;
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#f5f5f5';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  function drawPentagon(cx, cy, r, color = '#111') {
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  const rows = 6;
+  const cols = 12;
+  const stepX = canvas.width / cols;
+  const stepY = canvas.height / rows;
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const px = x * stepX + stepX * 0.5 + (y % 2 === 0 ? 0 : stepX * 0.25);
+      const py = y * stepY + stepY * 0.5;
+
+      if ((x + y) % 2 === 0) {
+        drawPentagon(px, py, Math.min(stepX, stepY) * 0.22, '#111');
+      }
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  ctx.lineWidth = 1.2;
+
+  for (let y = 0; y < rows; y++) {
+    ctx.beginPath();
+    ctx.moveTo(0, y * stepY + stepY * 0.5);
+    ctx.lineTo(canvas.width, y * stepY + stepY * 0.5);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
 function createBallMesh() {
-  const group = new THREE.Group();
+  const texture = createSoccerBallTexture();
 
   const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(BALL_RADIUS, 32, 24),
+    new THREE.SphereGeometry(BALL_RADIUS, 36, 28),
     new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.7,
+      map: texture,
+      roughness: 0.72,
       metalness: 0.0
     })
   );
+
   sphere.castShadow = true;
   sphere.receiveShadow = true;
+
+  const group = new THREE.Group();
   group.add(sphere);
-
-  const ring1 = new THREE.Mesh(
-    new THREE.TorusGeometry(BALL_RADIUS * 0.92, 0.015, 8, 32),
-    new THREE.MeshStandardMaterial({ color: 0x111111 })
-  );
-  ring1.rotation.x = Math.PI / 2;
-  group.add(ring1);
-
-  const ring2 = ring1.clone();
-  ring2.rotation.y = Math.PI / 2;
-  group.add(ring2);
-
   group.visible = false;
-  scene.add(group);
 
+  scene.add(group);
   ball.mesh = group;
 }
 
@@ -361,6 +414,41 @@ function setShadows(object, tint = null, forceSolid = false) {
       child.material.forEach(applyMaterialFix);
     } else {
       applyMaterialFix(child.material);
+    }
+  });
+}
+
+function applyStandingPose() {
+  if (!playerModel) return;
+
+  playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
+  playerModel.rotation.z = 0;
+
+  playerModel.traverse((child) => {
+    if (!child.isBone) return;
+
+    const name = child.name.toLowerCase();
+
+    if (name.includes('leftarm') && !name.includes('forearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.05, 0.12);
+      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.12);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.18, 0.12);
+    }
+
+    if (name.includes('rightarm') && !name.includes('forearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.05, 0.12);
+      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.12);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.18, 0.12);
+    }
+
+    if (name.includes('leftforearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.12, 0.12);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.12);
+    }
+
+    if (name.includes('rightforearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.12, 0.12);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.12);
     }
   });
 }
@@ -436,10 +524,10 @@ function syncPlayerVisual() {
   const moving = playerMoveBlend;
   const running = playerRunBlend;
 
-  const bob = Math.sin(performance.now() * 0.01 * (running > 0.5 ? 2.2 : 1.4)) * 0.02 * moving;
+  const bob = Math.sin(performance.now() * 0.012 * (running > 0.5 ? 2.6 : 1.5)) * 0.012 * moving;
   playerModel.position.y = bob;
-  playerModel.rotation.z = Math.sin(performance.now() * 0.012) * 0.015 * moving;
-  playerModel.rotation.x = -0.06 * moving - 0.02 * running;
+  playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.006 * moving;
+  playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
 }
 
 function syncGoalkeeperVisual() {
@@ -475,19 +563,22 @@ function updateCamera() {
 }
 
 function getBallStartPosition() {
-  const goalCenter = new THREE.Vector3(0, 0.24, GOAL_PLANE_Z);
-  const playerPos = new THREE.Vector3(
+  const forward = new THREE.Vector3(
+    Math.sin(playerFacing),
+    0,
+    -Math.cos(playerFacing)
+  ).normalize();
+
+  const base = new THREE.Vector3(
     playerCollider.start.x,
-    0.24,
+    0,
     playerCollider.start.z
   );
 
-  const toGoal = goalCenter.clone().sub(playerPos).setY(0).normalize();
-
   return new THREE.Vector3(
-    playerPos.x + toGoal.x * 0.55,
-    BALL_RADIUS + 0.02,
-    playerPos.z + toGoal.z * 0.55
+    base.x + forward.x * 0.10,
+    BALL_RADIUS - 0.01,
+    base.z + forward.z * 0.10
   );
 }
 
@@ -521,6 +612,7 @@ function resetBallForNextShot() {
   pendingShotTimer = 0;
   pendingShotDirection.set(0, 0, 0);
   pendingShotPower = 0;
+  kickLockTimer = 0;
 }
 
 function hideBall() {
@@ -594,6 +686,12 @@ function updatePlayer(deltaTime) {
 }
 
 function controls(deltaTime) {
+  if (kickLockTimer > 0) {
+    playerMoveBlend = THREE.MathUtils.lerp(playerMoveBlend, 0, 0.2);
+    playerRunBlend = THREE.MathUtils.lerp(playerRunBlend, 0, 0.2);
+    return;
+  }
+
   let moveX = 0;
   let moveZ = 0;
 
@@ -603,7 +701,7 @@ function controls(deltaTime) {
   if (keys['KeyD']) moveX += 1;
 
   const moving = moveX !== 0 || moveZ !== 0;
-  const isRunning = moving && !!keys['ShiftLeft'];
+  const isRunning = moving && (keys['ShiftLeft'] || keys['ShiftRight']);
 
   const speed = playerOnFloor
     ? (isRunning ? PLAYER_RUN_SPEED : PLAYER_SPEED)
@@ -736,7 +834,6 @@ function saveBall() {
   ).normalize();
 
   ball.velocity.copy(awayDir.multiplyScalar(11 + level * 0.6));
-
   resetShotTimer = 1.5;
 }
 
@@ -838,11 +935,13 @@ function shootBall() {
   const dir = currentShotTarget.clone().sub(startPos).normalize();
   const power = BALL_BASE_POWER + level * BALL_POWER_PER_LEVEL;
 
+  kickLockTimer = 0.34;
+
   playPlayerAction('kick');
   triggerGoalkeeperReaction(currentShotTarget);
 
   pendingShot = true;
-  pendingShotTimer = 0.02;
+  pendingShotTimer = 0.24;
   pendingShotDirection.copy(dir);
   pendingShotPower = power;
 
@@ -950,7 +1049,7 @@ async function loadPlayer() {
   playerModel = await loadFBX(PLAYER_MODEL_PATH);
   playerModel.scale.setScalar(PLAYER_SCALE);
   playerModel.position.set(0, 0, 0);
-  playerModel.rotation.y = 0;
+  playerModel.rotation.set(0, 0, 0);
   setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
   playerRoot.add(playerModel);
 
@@ -1129,6 +1228,14 @@ function animate() {
 
   if (playerMixer) playerMixer.update(dt);
   if (goalkeeperMixer) goalkeeperMixer.update(dt);
+
+  if (playerModel && !pendingShot && kickLockTimer <= 0) {
+    applyStandingPose();
+  }
+
+  if (kickLockTimer > 0) {
+    kickLockTimer -= dt;
+  }
 
   const subDt = dt / STEPS_PER_FRAME;
 
