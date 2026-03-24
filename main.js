@@ -25,36 +25,31 @@ const GOALKEEPER_DIVE_PATH = './goalkeeper/Dive.fbx';
 // AUDIO
 // ======================================================
 const AUDIO_FILES = {
-  fail: './audio/fail.wav',
+  kick: './audio/kick.wav',
   goal: './audio/goal.wav',
   save: './audio/save.wav',
-  kick: './audio/kick.wav'
+  miss: './audio/fail.wav'
 };
 
 const PLAYER_VISUAL_ROT_Y = Math.PI;
 const PLAYER_VISUAL_ROT_X = 0;
 
-// Ajustes visuales del jugador
 const PLAYER_MODEL_Y_OFFSET = -0.68;
 const PLAYER_ROOT_Y_OFFSET = -0.12;
 
-// Balón frente al jugador
 const BALL_RADIUS = 0.16;
 const BALL_FRONT_OFFSET = 0.82;
 const BALL_SIDE_OFFSET = 0.0;
 const BALL_START_Y = BALL_RADIUS - 0.02;
 
-// Momento exacto del contacto de la patada
 const KICK_CONTACT_TIME = 0.16;
 
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 const GOALKEEPER_SCALE = 0.0125;
 
-// Posiciones base
 const PLAYER_START = new THREE.Vector3(0, 0.6, 10.5);
 const GOALKEEPER_HOME = new THREE.Vector3(0, 0.0, -18.2);
 
-// Caja de gol
 const GOAL_MIN_X = -1.45;
 const GOAL_MAX_X = 1.45;
 const GOAL_MIN_Y = 0.10;
@@ -62,7 +57,6 @@ const GOAL_MAX_Y = 2.45;
 const GOAL_LINE_Z = -18.75;
 const GOAL_PLANE_Z = -18.60;
 
-// Física
 const GRAVITY = 24;
 const PLAYER_SPEED = 7.5;
 const PLAYER_RUN_SPEED = 15.5;
@@ -73,7 +67,6 @@ const STEPS_PER_FRAME = 5;
 const BALL_BASE_POWER = 21;
 const BALL_POWER_PER_LEVEL = 0.9;
 
-// Cámara
 const CAMERA_DISTANCE = 6.5;
 const CAMERA_HEIGHT = 2.4;
 const CAMERA_LERP = 0.12;
@@ -81,13 +74,11 @@ const LOOK_HEIGHT = 1.4;
 const MIN_PITCH = -0.45;
 const MAX_PITCH = 0.35;
 
-// Movimiento permitido del jugador
 const PLAYER_MIN_X = -9.0;
 const PLAYER_MAX_X = 9.0;
 const PLAYER_MIN_Z = -8.0;
 const PLAYER_MAX_Z = 13.5;
 
-// Juego
 const MAX_LEVEL = 10;
 const LEVEL_TIME = 60;
 const SHOTS_PER_LEVEL = 15;
@@ -102,7 +93,16 @@ const ui = {
   shots: document.getElementById('shots'),
   goals: document.getElementById('goals'),
   goalTarget: document.getElementById('goalTarget'),
-  message: document.getElementById('message')
+  message: document.getElementById('message'),
+
+  startMenu: document.getElementById('startMenu'),
+  pauseMenu: document.getElementById('pauseMenu'),
+  startGameBtn: document.getElementById('startGameBtn'),
+  resumeGameBtn: document.getElementById('resumeGameBtn'),
+  pauseBtn: document.getElementById('pauseBtn'),
+  soundBtn: document.getElementById('soundBtn'),
+  startSoundBtn: document.getElementById('startSoundBtn'),
+  pauseSoundBtn: document.getElementById('pauseSoundBtn')
 };
 
 // ======================================================
@@ -128,6 +128,8 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.VSMShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.domElement.tabIndex = 1;
+renderer.domElement.style.outline = 'none';
 document.body.appendChild(renderer.domElement);
 
 const stats = new Stats();
@@ -233,7 +235,6 @@ let kickFlash = null;
 let kickRing = null;
 let trailParticles = [];
 
-// Estado visual
 let playerMoveBlend = 0;
 let playerRunBlend = 0;
 let playerFacing = 0;
@@ -247,6 +248,7 @@ let pitch = -0.12;
 
 let gameStarted = false;
 let gamePaused = true;
+let gameEnded = false;
 
 // ======================================================
 // ESTADO DEL JUEGO
@@ -284,10 +286,76 @@ const keeperState = {
 };
 
 // ======================================================
-// HELPERS
+// HELPERS UI
 // ======================================================
 function setMessage(text) {
   if (ui.message) ui.message.textContent = text;
+}
+
+function showStartMenu() {
+  ui.startMenu?.classList.add('show');
+}
+
+function hideStartMenu() {
+  ui.startMenu?.classList.remove('show');
+}
+
+function showPauseMenu() {
+  ui.pauseMenu?.classList.add('show');
+}
+
+function hidePauseMenu() {
+  ui.pauseMenu?.classList.remove('show');
+}
+
+function updateSoundButtons() {
+  const label = audio.enabled ? '🔊 Sonido activado' : '🔇 Sonido desactivado';
+  const topLabel = audio.enabled ? '🔊 Sonido' : '🔇 Sin sonido';
+
+  if (ui.soundBtn) {
+    ui.soundBtn.textContent = topLabel;
+  }
+  if (ui.startSoundBtn) {
+    ui.startSoundBtn.textContent = label;
+    ui.startSoundBtn.classList.toggle('sound-off', !audio.enabled);
+  }
+  if (ui.pauseSoundBtn) {
+    ui.pauseSoundBtn.textContent = label;
+    ui.pauseSoundBtn.classList.toggle('sound-off', !audio.enabled);
+  }
+}
+
+function toggleSound() {
+  audio.enabled = !audio.enabled;
+  updateSoundButtons();
+}
+
+function pauseGame(showMenu = true) {
+  if (!gameStarted || gameEnded) return;
+  gamePaused = true;
+
+  if (document.pointerLockElement === renderer.domElement) {
+    document.exitPointerLock();
+  }
+
+  if (showMenu) {
+    showPauseMenu();
+  }
+  setMessage('Juego en pausa');
+}
+
+function resumeGame() {
+  if (!gameStarted || gameEnded) return;
+  hidePauseMenu();
+  renderer.domElement.focus();
+  renderer.domElement.requestPointerLock().catch(() => {});
+}
+
+function startGameFlow() {
+  hideStartMenu();
+  hidePauseMenu();
+  renderer.domElement.focus();
+  renderer.domElement.requestPointerLock().catch(() => {});
 }
 
 function updateHUD() {
@@ -371,21 +439,8 @@ function createSoccerBallTexture() {
     }
   }
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-  ctx.lineWidth = 1.2;
-
-  for (let y = 0; y < rows; y++) {
-    ctx.beginPath();
-    ctx.moveTo(0, y * stepY + stepY * 0.5);
-    ctx.lineTo(canvas.width, y * stepY + stepY * 0.5);
-    ctx.stroke();
-  }
-
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, 1);
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return tex;
 }
@@ -418,15 +473,6 @@ function createAudio(path, volume = 1) {
   a.preload = 'auto';
   a.volume = volume;
   a.load();
-
-  a.addEventListener('canplaythrough', () => {
-    console.log(`Audio cargado correctamente: ${path}`);
-  });
-
-  a.addEventListener('error', (e) => {
-    console.error(`Error cargando audio: ${path}`, e);
-  });
-
   return a;
 }
 
@@ -436,7 +482,6 @@ function initAudio() {
   audio.save = createAudio(AUDIO_FILES.save, 0.65);
   audio.miss = createAudio(AUDIO_FILES.miss, 0.55);
 }
-
 
 async function unlockAudio() {
   if (audio.unlocked) return;
@@ -451,13 +496,10 @@ async function unlockAudio() {
       a.pause();
       a.currentTime = 0;
       a.muted = false;
-    } catch (err) {
-      console.warn('No se pudo desbloquear un audio:', err);
-    }
+    } catch (_) {}
   }
 
   audio.unlocked = true;
-  console.log('Audio desbloqueado');
 }
 
 function playSound(name) {
@@ -468,12 +510,8 @@ function playSound(name) {
   try {
     s.pause();
     s.currentTime = 0;
-    s.play().catch((err) => {
-      console.warn(`No se pudo reproducir ${name}:`, err);
-    });
-  } catch (err) {
-    console.warn(`Error al reproducir ${name}:`, err);
-  }
+    s.play().catch(() => {});
+  } catch (_) {}
 }
 
 function createAimGuide() {
@@ -604,17 +642,13 @@ function updateEffects(deltaTime) {
   if (kickFlash && kickFlash.visible) {
     kickFlash.scale.multiplyScalar(1.12);
     kickFlash.material.opacity -= deltaTime * 4.0;
-    if (kickFlash.material.opacity <= 0) {
-      kickFlash.visible = false;
-    }
+    if (kickFlash.material.opacity <= 0) kickFlash.visible = false;
   }
 
   if (kickRing && kickRing.visible) {
     kickRing.scale.multiplyScalar(1.18);
     kickRing.material.opacity -= deltaTime * 3.5;
-    if (kickRing.material.opacity <= 0) {
-      kickRing.visible = false;
-    }
+    if (kickRing.material.opacity <= 0) kickRing.visible = false;
   }
 
   for (let i = trailParticles.length - 1; i >= 0; i--) {
@@ -1144,8 +1178,6 @@ function saveBall() {
   shotResolved = true;
   currentShotWasGoal = false;
   setMessage('¡ATAJADA!');
-
-  console.log('Sonido save');
   playSound('save');
 
   const awayDir = new THREE.Vector3(
@@ -1169,8 +1201,6 @@ function registerGoal() {
   goals += 1;
   updateHUD();
   setMessage('¡GOOOOL!');
-
-  console.log('Sonido goal');
   playSound('goal');
 
   playPlayerAction('celebrate');
@@ -1187,10 +1217,7 @@ function registerMiss(text = '¡FALLASTE!') {
   shotResolved = true;
   currentShotWasGoal = false;
   setMessage(text);
-
-  console.log('Sonido miss');
   playSound('miss');
-
   resetShotTimer = 1.4;
 }
 
@@ -1204,6 +1231,7 @@ function startLevel(levelNumber) {
   levelTransition = false;
   gamePaused = false;
   playerCanShoot = true;
+  gameEnded = false;
 
   setMessage(`Nivel ${level}`);
   updateHUD();
@@ -1225,6 +1253,7 @@ function failLevel() {
 
   setTimeout(() => {
     startLevel(level);
+    hidePauseMenu();
   }, 2200);
 }
 
@@ -1233,13 +1262,16 @@ function advanceLevel() {
   hideBall();
 
   if (level >= MAX_LEVEL) {
+    gameEnded = true;
     setMessage('¡GANASTE TODOS LOS NIVELES!');
+    showPauseMenu();
     return;
   }
 
   setMessage(`¡Nivel ${level} completado!`);
   setTimeout(() => {
     startLevel(level + 1);
+    hidePauseMenu();
   }, 2200);
 }
 
@@ -1272,10 +1304,7 @@ function shootBall() {
 
   playPlayerAction('kick');
   triggerGoalkeeperReaction(currentShotTarget);
-
-  console.log('Sonido kick');
   playSound('kick');
-
   triggerKickEffect(startPos);
 
   pendingShot = true;
@@ -1345,19 +1374,12 @@ function updateBall(deltaTime) {
   ball.velocity.addScaledVector(ball.velocity, damping);
   ball.mesh.position.copy(ball.collider.center);
 
-  if (ball.kicked && ball.velocity.length() > 6) {
-    if (Math.random() < 0.55) {
-      spawnTrailParticle(ball.collider.center.clone());
-    }
+  if (ball.kicked && ball.velocity.length() > 6 && Math.random() < 0.55) {
+    spawnTrailParticle(ball.collider.center.clone());
   }
 
-  if (!shotResolved && goalkeeperCanSaveBall()) {
-    saveBall();
-  }
-
-  if (!shotResolved && isInsideGoal(ball.collider.center)) {
-    registerGoal();
-  }
+  if (!shotResolved && goalkeeperCanSaveBall()) saveBall();
+  if (!shotResolved && isInsideGoal(ball.collider.center)) registerGoal();
 
   const tooFar =
     ball.collider.center.y < -4 ||
@@ -1399,7 +1421,6 @@ async function loadPlayer() {
   playerModelBaseY = playerModel.position.y;
 
   playerRoot.add(playerModel);
-
   playerMixer = new THREE.AnimationMixer(playerModel);
 
   const [idleFBX, kickFBX, celebrateFBX] = await Promise.all([
@@ -1408,48 +1429,28 @@ async function loadPlayer() {
     loadFBX(PLAYER_CELEBRATE_PATH)
   ]);
 
-  if (idleFBX.animations?.length) {
-    playerActions.idle = playerMixer.clipAction(idleFBX.animations[0]);
-  }
-
-  if (kickFBX.animations?.length) {
-    playerActions.kick = playerMixer.clipAction(kickFBX.animations[0]);
-  }
-
-  if (celebrateFBX.animations?.length) {
-    playerActions.celebrate = playerMixer.clipAction(celebrateFBX.animations[0]);
-  }
+  if (idleFBX.animations?.length) playerActions.idle = playerMixer.clipAction(idleFBX.animations[0]);
+  if (kickFBX.animations?.length) playerActions.kick = playerMixer.clipAction(kickFBX.animations[0]);
+  if (celebrateFBX.animations?.length) playerActions.celebrate = playerMixer.clipAction(celebrateFBX.animations[0]);
 
   playerMixer.addEventListener('finished', (event) => {
     if (!event.action) return;
 
     if (event.action === playerActions.kick) {
-      if (playerCurrentAction === playerActions.kick) {
-        playerCurrentAction = null;
-      }
-      if (!currentShotWasGoal) {
-        resumeBasePlayerAction(0.12);
-      }
+      if (playerCurrentAction === playerActions.kick) playerCurrentAction = null;
+      if (!currentShotWasGoal) resumeBasePlayerAction(0.12);
     }
 
     if (event.action === playerActions.celebrate) {
-      if (playerCurrentAction === playerActions.celebrate) {
-        playerCurrentAction = null;
-      }
+      if (playerCurrentAction === playerActions.celebrate) playerCurrentAction = null;
       resumeBasePlayerAction(0.16);
     }
   });
 
-  if (playerActions.idle) {
-    configureBaseAction(playerActions.idle);
-  }
+  if (playerActions.idle) configureBaseAction(playerActions.idle);
 
   resetPlayerPosition();
   syncPlayerVisual();
-
-  console.log('Jugador cargado correctamente');
-  console.log('Escala automática jugador:', result.scale);
-  console.log('Tamaño final jugador:', result.size);
 }
 
 async function loadGoalkeeper() {
@@ -1471,17 +1472,9 @@ async function loadGoalkeeper() {
     loadFBX(GOALKEEPER_DIVE_PATH)
   ]);
 
-  if (catch1FBX.animations?.length) {
-    goalkeeperActions.catch1 = goalkeeperMixer.clipAction(catch1FBX.animations[0]);
-  }
-
-  if (catch2FBX.animations?.length) {
-    goalkeeperActions.catch2 = goalkeeperMixer.clipAction(catch2FBX.animations[0]);
-  }
-
-  if (diveFBX.animations?.length) {
-    goalkeeperActions.dive = goalkeeperMixer.clipAction(diveFBX.animations[0]);
-  }
+  if (catch1FBX.animations?.length) goalkeeperActions.catch1 = goalkeeperMixer.clipAction(catch1FBX.animations[0]);
+  if (catch2FBX.animations?.length) goalkeeperActions.catch2 = goalkeeperMixer.clipAction(catch2FBX.animations[0]);
+  if (diveFBX.animations?.length) goalkeeperActions.dive = goalkeeperMixer.clipAction(diveFBX.animations[0]);
 
   syncGoalkeeperVisual();
 }
@@ -1490,6 +1483,7 @@ async function loadGame() {
   setMessage('Cargando cancha, jugador y portero...');
 
   initAudio();
+  updateSoundButtons();
 
   await loadCourt();
   await loadPlayer();
@@ -1504,44 +1498,65 @@ async function loadGame() {
   updateCamera();
 
   setMessage('Haz clic para comenzar');
+  showStartMenu();
 }
 
 // ======================================================
 // INPUT
 // ======================================================
 document.addEventListener('keydown', (event) => {
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyP', 'Escape'].includes(event.code)) {
+    event.preventDefault();
+  }
+
+  if (event.code === 'KeyP' || event.code === 'Escape') {
+    if (ui.startMenu.classList.contains('show')) return;
+
+    if (gamePaused) {
+      resumeGame();
+    } else {
+      pauseGame(true);
+    }
+    return;
+  }
+
   keys[event.code] = true;
 });
 
 document.addEventListener('keyup', (event) => {
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
+    event.preventDefault();
+  }
   keys[event.code] = false;
 });
 
 document.addEventListener('mousemove', (event) => {
-  if (document.pointerLockElement === document.body) {
+  if (document.pointerLockElement === renderer.domElement) {
     yaw -= event.movementX * 0.0022;
     pitch -= event.movementY * 0.0017;
     pitch = THREE.MathUtils.clamp(pitch, MIN_PITCH, MAX_PITCH);
   }
 });
 
-document.addEventListener('mousedown', async () => {
+window.addEventListener('click', () => {
+  renderer.domElement.focus();
+});
+
+renderer.domElement.addEventListener('mousedown', async () => {
+  renderer.domElement.focus();
+
   if (!audio.unlocked) {
     await unlockAudio();
   }
 
-  if (document.pointerLockElement !== document.body) {
-    try {
-      await document.body.requestPointerLock();
+  if (ui.startMenu.classList.contains('show') || ui.pauseMenu.classList.contains('show')) {
+    return;
+  }
 
-      if (!gameStarted) {
-        gameStarted = true;
-        gamePaused = false;
-        startLevel(1);
-      }
-    } catch (error) {
-      console.warn('No se pudo activar el pointer lock:', error);
-    }
+  if (document.pointerLockElement !== renderer.domElement) {
+    try {
+      await renderer.domElement.requestPointerLock();
+    } catch (_) {}
     return;
   }
 
@@ -1551,10 +1566,63 @@ document.addEventListener('mousedown', async () => {
 });
 
 document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement !== document.body) {
-    setMessage(gameStarted ? 'Haz clic para continuar' : 'Haz clic para comenzar');
+  const locked = document.pointerLockElement === renderer.domElement;
+
+  if (locked) {
+    gamePaused = false;
+
+    if (!gameStarted) {
+      gameStarted = true;
+      hideStartMenu();
+      startLevel(1);
+    } else {
+      hidePauseMenu();
+      setMessage('Apunta y dispara');
+    }
+  } else {
+    if (gameStarted && !gameEnded && !ui.startMenu.classList.contains('show')) {
+      gamePaused = true;
+      showPauseMenu();
+      setMessage('Juego en pausa');
+    }
   }
 });
+
+// ======================================================
+// BOTONES UI
+// ======================================================
+ui.startGameBtn?.addEventListener('click', async () => {
+  if (!audio.unlocked) {
+    await unlockAudio();
+  }
+  startGameFlow();
+});
+
+ui.resumeGameBtn?.addEventListener('click', async () => {
+  if (!audio.unlocked) {
+    await unlockAudio();
+  }
+  resumeGame();
+});
+
+ui.pauseBtn?.addEventListener('click', async () => {
+  if (!gameStarted) {
+    if (!audio.unlocked) await unlockAudio();
+    startGameFlow();
+    return;
+  }
+
+  if (gamePaused) {
+    if (!audio.unlocked) await unlockAudio();
+    resumeGame();
+  } else {
+    pauseGame(true);
+  }
+});
+
+ui.soundBtn?.addEventListener('click', toggleSound);
+ui.startSoundBtn?.addEventListener('click', toggleSound);
+ui.pauseSoundBtn?.addEventListener('click', toggleSound);
 
 // ======================================================
 // ANIMACIÓN GENERAL
@@ -1588,26 +1656,10 @@ function updateShotReset(deltaTime) {
   resetShotTimer -= deltaTime;
 
   if (resetShotTimer <= 0) {
-    if (levelTransition) {
-      advanceLevel();
-      return;
-    }
-
-    if (goals >= targetGoals) {
-      levelTransition = true;
-      advanceLevel();
-      return;
-    }
-
-    if (shotsLeft <= 0) {
-      failLevel();
-      return;
-    }
-
-    if (timeLeft <= 0) {
-      failLevel();
-      return;
-    }
+    if (levelTransition) return advanceLevel();
+    if (goals >= targetGoals) return advanceLevel();
+    if (shotsLeft <= 0) return failLevel();
+    if (timeLeft <= 0) return failLevel();
 
     resetBallForNextShot();
     setMessage('Apunta y dispara');
@@ -1622,9 +1674,7 @@ function animate() {
   if (playerMixer) playerMixer.update(dt);
   if (goalkeeperMixer) goalkeeperMixer.update(dt);
 
-  if (kickLockTimer > 0) {
-    kickLockTimer -= dt;
-  }
+  if (kickLockTimer > 0) kickLockTimer -= dt;
 
   const subDt = dt / STEPS_PER_FRAME;
 
@@ -1670,6 +1720,6 @@ window.addEventListener('resize', () => {
     animate();
   } catch (error) {
     console.error('Error cargando el juego:', error);
-    setMessage('Error cargando el juego. Revisa rutas y nombres exactos de archivos FBX y MP3.');
+    setMessage('Error cargando el juego. Revisa rutas y nombres exactos de archivos FBX y WAV.');
   }
 })();
