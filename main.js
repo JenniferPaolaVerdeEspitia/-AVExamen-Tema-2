@@ -20,8 +20,10 @@ const GOALKEEPER_CATCH_1_PATH = './goalkeeper/Catch1.fbx';
 const GOALKEEPER_CATCH_2_PATH = './goalkeeper/Catch2.fbx';
 const GOALKEEPER_DIVE_PATH = './goalkeeper/Dive.fbx';
 
+// Ajuste visual del modelo del jugador.
+// Si tu FBX viene acostado, normalmente +PI/2 en X lo corrige.
 const PLAYER_VISUAL_ROT_Y = Math.PI;
-const PLAYER_VISUAL_ROT_X = 0;
+const PLAYER_VISUAL_ROT_X = -Math.PI / 2;
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 
 const PLAYER_SCALE = 0.0125;
@@ -194,6 +196,18 @@ let goalkeeperCurrentAction = null;
 let playerMoveBlend = 0;
 let playerRunBlend = 0;
 let playerFacing = 0;
+let playerAnimClock = 0;
+
+const playerBones = {
+  leftArm: null,
+  rightArm: null,
+  leftForeArm: null,
+  rightForeArm: null,
+  leftUpLeg: null,
+  rightUpLeg: null,
+  leftLeg: null,
+  rightLeg: null
+};
 
 // ======================================================
 // CÁMARA / INPUT
@@ -291,52 +305,42 @@ function createSoccerBallTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 512;
-
   const ctx = canvas.getContext('2d');
+
   ctx.fillStyle = '#f5f5f5';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  function drawPentagon(cx, cy, r, color = '#111') {
+  function drawHexLike(cx, cy, r, fill = '#111') {
     ctx.beginPath();
-    for (let i = 0; i < 5; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 6) + (i * Math.PI * 2) / 6;
       const x = cx + Math.cos(a) * r;
       const y = cy + Math.sin(a) * r;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.closePath();
-    ctx.fillStyle = color;
+    ctx.fillStyle = fill;
     ctx.fill();
     ctx.strokeStyle = '#222';
     ctx.lineWidth = 2;
     ctx.stroke();
   }
 
-  const rows = 6;
-  const cols = 12;
+  const rows = 8;
+  const cols = 16;
   const stepX = canvas.width / cols;
   const stepY = canvas.height / rows;
 
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      const px = x * stepX + stepX * 0.5 + (y % 2 === 0 ? 0 : stepX * 0.25);
+      const px = x * stepX + stepX * 0.5 + (y % 2 === 0 ? 0 : stepX * 0.5);
       const py = y * stepY + stepY * 0.5;
 
       if ((x + y) % 2 === 0) {
-        drawPentagon(px, py, Math.min(stepX, stepY) * 0.22, '#111');
+        drawHexLike(px, py, Math.min(stepX, stepY) * 0.22, '#111');
       }
     }
-  }
-
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-  ctx.lineWidth = 1.2;
-
-  for (let y = 0; y < rows; y++) {
-    ctx.beginPath();
-    ctx.moveTo(0, y * stepY + stepY * 0.5);
-    ctx.lineTo(canvas.width, y * stepY + stepY * 0.5);
-    ctx.stroke();
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -418,39 +422,77 @@ function setShadows(object, tint = null, forceSolid = false) {
   });
 }
 
-function applyStandingPose() {
+function cachePlayerBones() {
   if (!playerModel) return;
-
-  playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
-  playerModel.rotation.z = 0;
 
   playerModel.traverse((child) => {
     if (!child.isBone) return;
 
-    const name = child.name.toLowerCase();
+    const n = child.name.toLowerCase();
 
-    if (name.includes('leftarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.05, 0.12);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.18, 0.12);
-    }
-
-    if (name.includes('rightarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.05, 0.12);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.18, 0.12);
-    }
-
-    if (name.includes('leftforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.12, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.12);
-    }
-
-    if (name.includes('rightforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.12, 0.12);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.12);
-    }
+    if (n.includes('leftarm') && !n.includes('forearm')) playerBones.leftArm = child;
+    else if (n.includes('rightarm') && !n.includes('forearm')) playerBones.rightArm = child;
+    else if (n.includes('leftforearm')) playerBones.leftForeArm = child;
+    else if (n.includes('rightforearm')) playerBones.rightForeArm = child;
+    else if (n.includes('leftupleg')) playerBones.leftUpLeg = child;
+    else if (n.includes('rightupleg')) playerBones.rightUpLeg = child;
+    else if (n.includes('leftleg') && !n.includes('upleg')) playerBones.leftLeg = child;
+    else if (n.includes('rightleg') && !n.includes('upleg')) playerBones.rightLeg = child;
   });
+}
+
+function lerpBone(bone, x, y, z, a = 0.16) {
+  if (!bone) return;
+  bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, x, a);
+  bone.rotation.y = THREE.MathUtils.lerp(bone.rotation.y, y, a);
+  bone.rotation.z = THREE.MathUtils.lerp(bone.rotation.z, z, a);
+}
+
+function applyIdlePose() {
+  // Brazos abajo desde T-pose
+  lerpBone(playerBones.leftArm, 0.0, 0.0, 1.15, 0.12);
+  lerpBone(playerBones.rightArm, 0.0, 0.0, -1.15, 0.12);
+
+  // Antebrazos relajados
+  lerpBone(playerBones.leftForeArm, 0.0, 0.0, 0.08, 0.12);
+  lerpBone(playerBones.rightForeArm, 0.0, 0.0, -0.08, 0.12);
+
+  // Piernas ligeramente abiertas
+  lerpBone(playerBones.leftUpLeg, 0.04, 0.0, 0.04, 0.12);
+  lerpBone(playerBones.rightUpLeg, 0.04, 0.0, -0.04, 0.12);
+  lerpBone(playerBones.leftLeg, 0.03, 0.0, 0.0, 0.12);
+  lerpBone(playerBones.rightLeg, 0.03, 0.0, 0.0, 0.12);
+}
+
+function applyRunCycle(deltaTime) {
+  playerAnimClock += deltaTime;
+
+  const moving = Math.max(playerMoveBlend, playerRunBlend);
+  if (moving < 0.03) {
+    applyIdlePose();
+    return;
+  }
+
+  const runFactor = playerRunBlend > 0.4 ? 1.0 : 0.55;
+  const t = playerAnimClock * (playerRunBlend > 0.4 ? 10.5 : 6.5);
+
+  const armSwing = Math.sin(t) * 0.55 * runFactor;
+  const legSwing = Math.sin(t) * 0.85 * runFactor;
+  const kneeA = Math.max(0, -Math.sin(t)) * 0.55 * runFactor;
+  const kneeB = Math.max(0, Math.sin(t)) * 0.55 * runFactor;
+
+  // Base brazos abajo + oscilación al correr
+  lerpBone(playerBones.leftArm, armSwing, 0.0, 1.10, 0.18);
+  lerpBone(playerBones.rightArm, -armSwing, 0.0, -1.10, 0.18);
+
+  lerpBone(playerBones.leftForeArm, -0.12, 0.0, 0.06, 0.18);
+  lerpBone(playerBones.rightForeArm, -0.12, 0.0, -0.06, 0.18);
+
+  lerpBone(playerBones.leftUpLeg, legSwing, 0.0, 0.03, 0.20);
+  lerpBone(playerBones.rightUpLeg, -legSwing, 0.0, -0.03, 0.20);
+
+  lerpBone(playerBones.leftLeg, 0.05 + kneeA, 0.0, 0.0, 0.20);
+  lerpBone(playerBones.rightLeg, 0.05 + kneeB, 0.0, 0.0, 0.20);
 }
 
 function loadGLTF(path) {
@@ -524,10 +566,10 @@ function syncPlayerVisual() {
   const moving = playerMoveBlend;
   const running = playerRunBlend;
 
-  const bob = Math.sin(performance.now() * 0.012 * (running > 0.5 ? 2.6 : 1.5)) * 0.012 * moving;
+  const bob = Math.sin(performance.now() * 0.014 * (running > 0.5 ? 2.8 : 1.7)) * 0.010 * moving;
   playerModel.position.y = bob;
-  playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.006 * moving;
   playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
+  playerModel.rotation.z = 0;
 }
 
 function syncGoalkeeperVisual() {
@@ -576,9 +618,9 @@ function getBallStartPosition() {
   );
 
   return new THREE.Vector3(
-    base.x + forward.x * 0.10,
+    base.x + forward.x * 0.06,
     BALL_RADIUS - 0.01,
-    base.z + forward.z * 0.10
+    base.z + forward.z * 0.06
   );
 }
 
@@ -777,10 +819,9 @@ function updateGoalkeeper(deltaTime) {
   if (!goalkeeperRoot) return;
 
   if (keeperState.reacting) {
-    const targetPosX = keeperState.targetX;
     goalkeeperRoot.position.x = THREE.MathUtils.lerp(
       goalkeeperRoot.position.x,
-      targetPosX,
+      keeperState.targetX,
       deltaTime * keeperState.moveSpeed
     );
 
@@ -1049,9 +1090,11 @@ async function loadPlayer() {
   playerModel = await loadFBX(PLAYER_MODEL_PATH);
   playerModel.scale.setScalar(PLAYER_SCALE);
   playerModel.position.set(0, 0, 0);
-  playerModel.rotation.set(0, 0, 0);
+  playerModel.rotation.set(PLAYER_VISUAL_ROT_X, 0, 0);
   setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
   playerRoot.add(playerModel);
+
+  cachePlayerBones();
 
   playerMixer = new THREE.AnimationMixer(playerModel);
 
@@ -1230,7 +1273,7 @@ function animate() {
   if (goalkeeperMixer) goalkeeperMixer.update(dt);
 
   if (playerModel && !pendingShot && kickLockTimer <= 0) {
-    applyStandingPose();
+    applyRunCycle(dt);
   }
 
   if (kickLockTimer > 0) {
