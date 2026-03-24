@@ -32,17 +32,17 @@ const AUDIO_FILES = {
 };
 
 const PLAYER_VISUAL_ROT_Y = Math.PI;
-const PLAYER_VISUAL_ROT_X = 0;
+const PLAYER_VISUAL_ROT_X = 0.0;
 
 const PLAYER_MODEL_Y_OFFSET = -0.68;
 const PLAYER_ROOT_Y_OFFSET = -0.12;
 
 const BALL_RADIUS = 0.16;
-const BALL_FRONT_OFFSET = 0.82;
-const BALL_SIDE_OFFSET = 0.0;
-const BALL_START_Y = BALL_RADIUS - 0.02;
+const BALL_FRONT_OFFSET = 0.50;
+const BALL_SIDE_OFFSET = 0.18;
+const BALL_START_Y = BALL_RADIUS - 0.005;
 
-const KICK_CONTACT_TIME = 0.16;
+const KICK_CONTACT_TIME = 0.30;
 
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 const GOALKEEPER_SCALE = 0.0125;
@@ -312,9 +312,7 @@ function updateSoundButtons() {
   const label = audio.enabled ? '🔊 Sonido activado' : '🔇 Sonido desactivado';
   const topLabel = audio.enabled ? '🔊 Sonido' : '🔇 Sin sonido';
 
-  if (ui.soundBtn) {
-    ui.soundBtn.textContent = topLabel;
-  }
+  if (ui.soundBtn) ui.soundBtn.textContent = topLabel;
   if (ui.startSoundBtn) {
     ui.startSoundBtn.textContent = label;
     ui.startSoundBtn.classList.toggle('sound-off', !audio.enabled);
@@ -338,9 +336,7 @@ function pauseGame(showMenu = true) {
     document.exitPointerLock();
   }
 
-  if (showMenu) {
-    showPauseMenu();
-  }
+  if (showMenu) showPauseMenu();
   setMessage('Juego en pausa');
 }
 
@@ -714,7 +710,7 @@ function setShadows(object, tint = null, forceSolid = false) {
   });
 }
 
-function normalizeModelToGround(object3D, desiredHeight = 1.66) {
+function normalizeModelToGround(object3D, desiredHeight = 1.62) {
   const initialBox = new THREE.Box3().setFromObject(object3D);
   const initialSize = new THREE.Vector3();
   initialBox.getSize(initialSize);
@@ -847,10 +843,11 @@ function syncPlayerVisual() {
   playerRoot.rotation.y = THREE.MathUtils.lerp(playerRoot.rotation.y, targetRot, 0.18);
 
   const moving = playerMoveBlend;
-  const bob = Math.sin(performance.now() * 0.012) * 0.008 * moving;
+  const bob = Math.sin(performance.now() * 0.012) * 0.006 * moving;
 
   playerModel.position.y = playerModelBaseY + PLAYER_MODEL_Y_OFFSET + bob;
   playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
+  playerModel.rotation.y = 0;
   playerModel.rotation.z = 0;
 }
 
@@ -887,26 +884,27 @@ function updateCamera() {
 }
 
 function getBallStartPosition() {
-  if (!playerRoot) {
-    return new THREE.Vector3(
-      playerCollider.start.x,
-      BALL_START_Y,
-      playerCollider.start.z - BALL_FRONT_OFFSET
-    );
-  }
-
-  const visualForward = new THREE.Vector3(0, 0, 1).applyQuaternion(playerRoot.quaternion).normalize();
-  const visualRight = new THREE.Vector3(1, 0, 0).applyQuaternion(playerRoot.quaternion).normalize();
-
   const base = new THREE.Vector3(
     playerCollider.start.x,
     BALL_START_Y,
     playerCollider.start.z
   );
 
+  const forward = new THREE.Vector3(
+    Math.sin(playerFacing),
+    0,
+    -Math.cos(playerFacing)
+  ).normalize();
+
+  const right = new THREE.Vector3(
+    Math.cos(playerFacing),
+    0,
+    Math.sin(playerFacing)
+  ).normalize();
+
   return base
-    .add(visualForward.multiplyScalar(BALL_FRONT_OFFSET))
-    .add(visualRight.multiplyScalar(BALL_SIDE_OFFSET));
+    .add(forward.multiplyScalar(BALL_FRONT_OFFSET))
+    .add(right.multiplyScalar(BALL_SIDE_OFFSET));
 }
 
 function resetBallForNextShot() {
@@ -1111,7 +1109,6 @@ function triggerGoalkeeperReaction(targetPoint) {
   keeperState.targetX = guessedX;
   keeperState.moveSpeed = 4.5 + level * 0.28;
 
-  const centerShot = Math.abs(targetX) < 0.45;
   const highShot = targetY > 1.7;
   const extremeShot = Math.abs(targetX) > 0.85;
 
@@ -1296,10 +1293,10 @@ function shootBall() {
   const dir = currentShotTarget.clone().sub(startPos).normalize();
   const power = BALL_BASE_POWER + level * BALL_POWER_PER_LEVEL;
 
-  kickLockTimer = 0.34;
+  kickLockTimer = 0.46;
 
   if (playerActions.kick) {
-    playerActions.kick.timeScale = 1.15;
+    playerActions.kick.timeScale = 0.92;
   }
 
   playPlayerAction('kick');
@@ -1417,7 +1414,7 @@ async function loadPlayer() {
 
   setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
 
-  const result = normalizeModelToGround(playerModel, 1.66);
+  const result = normalizeModelToGround(playerModel, 1.62);
   playerModelBaseY = playerModel.position.y;
 
   playerRoot.add(playerModel);
@@ -1512,11 +1509,8 @@ document.addEventListener('keydown', (event) => {
   if (event.code === 'KeyP' || event.code === 'Escape') {
     if (ui.startMenu.classList.contains('show')) return;
 
-    if (gamePaused) {
-      resumeGame();
-    } else {
-      pauseGame(true);
-    }
+    if (gamePaused) resumeGame();
+    else pauseGame(true);
     return;
   }
 
@@ -1592,16 +1586,12 @@ document.addEventListener('pointerlockchange', () => {
 // BOTONES UI
 // ======================================================
 ui.startGameBtn?.addEventListener('click', async () => {
-  if (!audio.unlocked) {
-    await unlockAudio();
-  }
+  if (!audio.unlocked) await unlockAudio();
   startGameFlow();
 });
 
 ui.resumeGameBtn?.addEventListener('click', async () => {
-  if (!audio.unlocked) {
-    await unlockAudio();
-  }
+  if (!audio.unlocked) await unlockAudio();
   resumeGame();
 });
 
