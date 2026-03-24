@@ -24,11 +24,10 @@ const PLAYER_VISUAL_ROT_Y = Math.PI;
 const PLAYER_VISUAL_ROT_X = 0;
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 
-const PLAYER_SCALE = 0.0125;
 const GOALKEEPER_SCALE = 0.0125;
 
 // Posiciones base
-const PLAYER_START = new THREE.Vector3(0, 0.35, 10.5);
+const PLAYER_START = new THREE.Vector3(0, 0.6, 8.8);
 const GOALKEEPER_HOME = new THREE.Vector3(0, 0.0, -18.2);
 
 // Caja de gol
@@ -179,6 +178,8 @@ let playerActions = {
   celebrate: null
 };
 let playerCurrentAction = null;
+
+let playerModelBaseY = 0;
 
 let goalkeeperRoot = null;
 let goalkeeperModel = null;
@@ -429,7 +430,6 @@ function applyStandingPose() {
 
     const name = child.name.toLowerCase();
 
-    // Brazos hacia abajo
     if (name.includes('leftarm') && !name.includes('forearm')) {
       child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55, 0.14);
       child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
@@ -454,7 +454,6 @@ function applyStandingPose() {
       child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.02, 0.14);
     }
 
-    // Piernas ligeramente abiertas
     if (name.includes('leftupleg')) {
       child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.03, 0.14);
       child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.14);
@@ -475,7 +474,7 @@ function applyStandingPose() {
   });
 }
 
-function applyRunPose(deltaTime) {
+function applyRunPose() {
   if (!playerModel) return;
 
   const moving = playerMoveBlend;
@@ -601,7 +600,7 @@ function syncPlayerVisual() {
 
   playerRoot.position.set(
     playerCollider.start.x,
-    playerCollider.start.y - 0.35,
+    playerCollider.start.y,
     playerCollider.start.z
   );
 
@@ -612,7 +611,7 @@ function syncPlayerVisual() {
   const running = playerRunBlend;
 
   const bob = Math.sin(performance.now() * 0.016 * (running > 0.5 ? 3.0 : 1.8)) * 0.02 * moving;
-  playerModel.position.y = bob;
+  playerModel.position.y = playerModelBaseY + bob;
   playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.004 * moving;
   playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
 }
@@ -659,13 +658,13 @@ function getBallStartPosition() {
   const base = new THREE.Vector3(
     playerCollider.start.x,
     0,
-    playerCollider.start.z
+    playerCollider.start.z - 0.9
   );
 
   return new THREE.Vector3(
-    base.x + forward.x * 0.06,
+    base.x + forward.x * 0.05,
     BALL_RADIUS - 0.01,
-    base.z + forward.z * 0.06
+    base.z + forward.z * 0.05
   );
 }
 
@@ -748,9 +747,19 @@ function playerCollisions() {
         result.normal,
         -result.normal.dot(playerVelocity)
       );
+    } else {
+      playerVelocity.y = Math.max(0, playerVelocity.y);
     }
 
     playerCollider.translate(result.normal.multiplyScalar(result.depth));
+  }
+
+  if (playerCollider.start.y < PLAYER_START.y) {
+    const delta = PLAYER_START.y - playerCollider.start.y;
+    playerCollider.start.y += delta;
+    playerCollider.end.y += delta;
+    playerVelocity.y = Math.max(0, playerVelocity.y);
+    playerOnFloor = true;
   }
 
   clampPlayerArea();
@@ -813,6 +822,7 @@ function controls(deltaTime) {
 
   if (playerOnFloor && keys['Space']) {
     playerVelocity.y = PLAYER_JUMP_SPEED;
+    playerOnFloor = false;
   }
 }
 
@@ -1006,7 +1016,7 @@ function advanceLevel() {
 // ======================================================
 function shootBall() {
   if (!ball.mesh) return;
-  if (!gameStarted || gamePaused || !playerCanShoot || !ball.active || ball.kicked) return;
+  if (!gameStarted || gamePaused || !playerCanShoot || !ball.active || !ball.visible || ball.kicked) return;
   if (shotsLeft <= 0 || timeLeft <= 0) return;
 
   playerCanShoot = false;
@@ -1134,10 +1144,30 @@ async function loadPlayer() {
   scene.add(playerRoot);
 
   playerModel = await loadFBX(PLAYER_MODEL_PATH);
-  playerModel.scale.setScalar(PLAYER_SCALE);
-  playerModel.position.set(0, 0, 0);
   playerModel.rotation.set(0, 0, 0);
+
   setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
+
+  const manualScale = 220;
+  playerModel.scale.setScalar(manualScale);
+  playerModel.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(playerModel);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  playerModel.position.x -= center.x;
+  playerModel.position.z -= center.z;
+  playerModel.position.y -= box.min.y;
+
+  playerModel.updateMatrixWorld(true);
+
+  const finalBox = new THREE.Box3().setFromObject(playerModel);
+  const finalSize = new THREE.Vector3();
+  finalBox.getSize(finalSize);
+
+  playerModelBaseY = playerModel.position.y;
+
   playerRoot.add(playerModel);
 
   playerMixer = new THREE.AnimationMixer(playerModel);
@@ -1155,6 +1185,10 @@ async function loadPlayer() {
 
   resetPlayerPosition();
   syncPlayerVisual();
+
+  console.log('Jugador cargado correctamente');
+  console.log('Escala manual jugador:', manualScale);
+  console.log('Tamaño final jugador:', finalSize);
 }
 
 async function loadGoalkeeper() {
@@ -1318,7 +1352,7 @@ function animate() {
 
   if (playerModel && !pendingShot && kickLockTimer <= 0) {
     applyStandingPose();
-    applyRunPose(dt);
+    applyRunPose();
   }
 
   if (kickLockTimer > 0) {
