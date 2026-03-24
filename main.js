@@ -12,6 +12,7 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 const COURT_PATH = './models/scene.gltf';
 
 const PLAYER_MODEL_PATH = './player/Jugador.fbx';
+const PLAYER_IDLE_POSE_PATH = './player/Pose.fbx';
 const PLAYER_KICK_PATH = './player/Disparo.fbx';
 const PLAYER_CELEBRATE_PATH = './player/Celebracion.fbx';
 
@@ -22,10 +23,9 @@ const GOALKEEPER_DIVE_PATH = './goalkeeper/Dive.fbx';
 
 const PLAYER_VISUAL_ROT_Y = Math.PI;
 const PLAYER_VISUAL_ROT_X = 0;
-const GOALKEEPER_VISUAL_ROT_Y = 0;
+const PLAYER_MODEL_Y_OFFSET = -0.34;
 
-// Ya no dependemos tanto de esta escala fija para el jugador,
-// pero se deja para el portero.
+const GOALKEEPER_VISUAL_ROT_Y = 0;
 const GOALKEEPER_SCALE = 0.0125;
 
 // Posiciones base
@@ -176,12 +176,12 @@ let playerRoot = null;
 let playerModel = null;
 let playerMixer = null;
 let playerActions = {
+  idle: null,
   kick: null,
   celebrate: null
 };
 let playerCurrentAction = null;
-
-// offset visual del jugador ya centrado
+let playerBaseAction = null;
 let playerModelBaseY = 0;
 
 let goalkeeperRoot = null;
@@ -454,126 +454,6 @@ function normalizeModelToGround(object3D, desiredHeight = 1.8) {
   };
 }
 
-function applyStandingPose() {
-  if (!playerModel) return;
-
-  playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
-  playerModel.rotation.z = 0;
-
-  playerModel.traverse((child) => {
-    if (!child.isBone) return;
-
-    const name = child.name.toLowerCase();
-
-    if (name.includes('leftarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55, 0.14);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.14);
-    }
-
-    if (name.includes('rightarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55, 0.14);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.14);
-    }
-
-    if (name.includes('leftforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.18, 0.14);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.02, 0.14);
-    }
-
-    if (name.includes('rightforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.18, 0.14);
-      child.rotation.y = THREE.MathUtils.lerp(child.rotation.y, 0.0, 0.14);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.02, 0.14);
-    }
-
-    if (name.includes('leftupleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.03, 0.14);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.14);
-    }
-
-    if (name.includes('rightupleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.03, 0.14);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.14);
-    }
-
-    if (name.includes('leftleg') && !name.includes('upleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.02, 0.14);
-    }
-
-    if (name.includes('rightleg') && !name.includes('upleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, 0.02, 0.14);
-    }
-  });
-}
-
-function applyRunPose(deltaTime) {
-  if (!playerModel) return;
-
-  const moving = playerMoveBlend;
-  const running = playerRunBlend;
-  const motion = Math.max(moving, running);
-
-  if (motion <= 0.02) return;
-
-  const t = performance.now() * 0.01 * (running > 0.5 ? 1.45 : 0.9);
-  const legSwing = Math.sin(t) * (running > 0.5 ? 0.95 : 0.45) * motion;
-  const armSwing = Math.sin(t) * (running > 0.5 ? 0.75 : 0.35) * motion;
-  const kneeBend = Math.abs(Math.sin(t)) * (running > 0.5 ? 0.55 : 0.22) * motion;
-
-  playerModel.traverse((child) => {
-    if (!child.isBone) return;
-
-    const name = child.name.toLowerCase();
-
-    if (name.includes('leftarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 + armSwing, 0.18);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.18);
-    }
-
-    if (name.includes('rightarm') && !name.includes('forearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 - armSwing, 0.18);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.18);
-    }
-
-    if (name.includes('leftforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
-    }
-
-    if (name.includes('rightforearm')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
-    }
-
-    if (name.includes('leftupleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, legSwing, 0.2);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.2);
-    }
-
-    if (name.includes('rightupleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -legSwing, 0.2);
-      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.2);
-    }
-
-    if (name.includes('leftleg') && !name.includes('upleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(
-        child.rotation.x,
-        0.04 + Math.max(0, -legSwing) * kneeBend,
-        0.2
-      );
-    }
-
-    if (name.includes('rightleg') && !name.includes('upleg')) {
-      child.rotation.x = THREE.MathUtils.lerp(
-        child.rotation.x,
-        0.04 + Math.max(0, legSwing) * kneeBend,
-        0.2
-      );
-    }
-  });
-}
-
 function loadGLTF(path) {
   return new Promise((resolve, reject) => {
     gltfLoader.load(path, resolve, undefined, reject);
@@ -586,26 +466,58 @@ function loadFBX(path) {
   });
 }
 
+function configureBaseAction(action) {
+  if (!action) return;
+  action.enabled = true;
+  action.clampWhenFinished = false;
+  action.setLoop(THREE.LoopRepeat, Infinity);
+  action.reset();
+  action.fadeIn(0.12);
+  action.play();
+  playerBaseAction = action;
+}
+
+function stopBasePlayerAction(fade = 0.1) {
+  if (!playerBaseAction) return;
+  playerBaseAction.fadeOut(fade);
+}
+
+function resumeBasePlayerAction(fade = 0.14) {
+  if (!playerActions.idle) return;
+  playerActions.idle.enabled = true;
+  playerActions.idle.paused = false;
+  playerActions.idle.setEffectiveWeight(1);
+  playerActions.idle.fadeIn(fade);
+  playerActions.idle.play();
+  playerBaseAction = playerActions.idle;
+}
+
 function makeOneShot(action) {
   if (!action) return;
   action.reset();
   action.enabled = true;
   action.clampWhenFinished = true;
+  action.paused = false;
   action.setLoop(THREE.LoopOnce, 1);
 }
 
-function stopCurrentPlayerAction() {
+function stopCurrentPlayerAction(fade = 0.08) {
   if (playerCurrentAction) {
-    playerCurrentAction.stop();
+    playerCurrentAction.fadeOut(fade);
     playerCurrentAction = null;
   }
 }
 
 function playPlayerAction(name) {
-  if (!playerActions[name]) return;
-  stopCurrentPlayerAction();
-  playerCurrentAction = playerActions[name];
+  const action = playerActions[name];
+  if (!action) return;
+
+  stopBasePlayerAction(0.08);
+  stopCurrentPlayerAction(0.05);
+
+  playerCurrentAction = action;
   makeOneShot(playerCurrentAction);
+  playerCurrentAction.fadeIn(0.06);
   playerCurrentAction.play();
 }
 
@@ -646,7 +558,7 @@ function syncPlayerVisual() {
   const running = playerRunBlend;
 
   const bob = Math.sin(performance.now() * 0.016 * (running > 0.5 ? 3.0 : 1.8)) * 0.02 * moving;
-  playerModel.position.y = playerModelBaseY + bob;
+  playerModel.position.y = playerModelBaseY + PLAYER_MODEL_Y_OFFSET + bob;
   playerModel.rotation.z = Math.sin(performance.now() * 0.010) * 0.004 * moving;
   playerModel.rotation.x = PLAYER_VISUAL_ROT_X;
 }
@@ -734,6 +646,10 @@ function resetBallForNextShot() {
   pendingShotDirection.set(0, 0, 0);
   pendingShotPower = 0;
   kickLockTimer = 0;
+
+  if (playerActions.idle) {
+    resumeBasePlayerAction(0.12);
+  }
 }
 
 function hideBall() {
@@ -764,6 +680,21 @@ function getShotTargetPoint() {
   }
 
   return new THREE.Vector3(0, 1.2, GOAL_PLANE_Z);
+}
+
+function updatePlayerAnimationState() {
+  if (!playerModel) return;
+
+  const moving = playerMoveBlend > 0.08;
+  const blockedByShot = kickLockTimer > 0 || pendingShot || !!playerCurrentAction;
+
+  if (blockedByShot) return;
+
+  if (moving) {
+    stopBasePlayerAction(0.10);
+  } else {
+    resumeBasePlayerAction(0.12);
+  }
 }
 
 // ======================================================
@@ -817,7 +748,7 @@ function updatePlayer(deltaTime) {
 }
 
 function controls(deltaTime) {
-  if (kickLockTimer > 0) {
+  if (kickLockTimer > 0 || playerCurrentAction === playerActions.celebrate) {
     playerMoveBlend = THREE.MathUtils.lerp(playerMoveBlend, 0, 0.2);
     playerRunBlend = THREE.MathUtils.lerp(playerRunBlend, 0, 0.2);
     return;
@@ -898,8 +829,6 @@ function triggerGoalkeeperReaction(targetPoint) {
 
   if (extremeShot) {
     playGoalkeeperAction('dive');
-  } else if (centerShot) {
-    playGoalkeeperAction(Math.random() < 0.5 ? 'catch1' : 'catch2');
   } else {
     playGoalkeeperAction(Math.random() < 0.5 ? 'catch1' : 'catch2');
   }
@@ -1019,6 +948,7 @@ function startLevel(levelNumber) {
   }
 
   resetBallForNextShot();
+  resumeBasePlayerAction(0.12);
 }
 
 function failLevel() {
@@ -1067,13 +997,13 @@ function shootBall() {
   const dir = currentShotTarget.clone().sub(startPos).normalize();
   const power = BALL_BASE_POWER + level * BALL_POWER_PER_LEVEL;
 
-  kickLockTimer = 0.34;
+  kickLockTimer = 0.42;
 
   playPlayerAction('kick');
   triggerGoalkeeperReaction(currentShotTarget);
 
   pendingShot = true;
-  pendingShotTimer = 0.24;
+  pendingShotTimer = 0.28;
   pendingShotDirection.copy(dir);
   pendingShotPower = power;
 
@@ -1190,8 +1120,15 @@ async function loadPlayer() {
 
   playerMixer = new THREE.AnimationMixer(playerModel);
 
-  const kickFBX = await loadFBX(PLAYER_KICK_PATH);
-  const celebrateFBX = await loadFBX(PLAYER_CELEBRATE_PATH);
+  const [idleFBX, kickFBX, celebrateFBX] = await Promise.all([
+    loadFBX(PLAYER_IDLE_POSE_PATH),
+    loadFBX(PLAYER_KICK_PATH),
+    loadFBX(PLAYER_CELEBRATE_PATH)
+  ]);
+
+  if (idleFBX.animations?.length) {
+    playerActions.idle = playerMixer.clipAction(idleFBX.animations[0]);
+  }
 
   if (kickFBX.animations?.length) {
     playerActions.kick = playerMixer.clipAction(kickFBX.animations[0]);
@@ -1199,6 +1136,30 @@ async function loadPlayer() {
 
   if (celebrateFBX.animations?.length) {
     playerActions.celebrate = playerMixer.clipAction(celebrateFBX.animations[0]);
+  }
+
+  playerMixer.addEventListener('finished', (event) => {
+    if (!event.action) return;
+
+    if (event.action === playerActions.kick) {
+      if (playerCurrentAction === playerActions.kick) {
+        playerCurrentAction = null;
+      }
+      if (!currentShotWasGoal) {
+        resumeBasePlayerAction(0.12);
+      }
+    }
+
+    if (event.action === playerActions.celebrate) {
+      if (playerCurrentAction === playerActions.celebrate) {
+        playerCurrentAction = null;
+      }
+      resumeBasePlayerAction(0.16);
+    }
+  });
+
+  if (playerActions.idle) {
+    configureBaseAction(playerActions.idle);
   }
 
   resetPlayerPosition();
@@ -1222,9 +1183,11 @@ async function loadGoalkeeper() {
 
   goalkeeperMixer = new THREE.AnimationMixer(goalkeeperModel);
 
-  const catch1FBX = await loadFBX(GOALKEEPER_CATCH_1_PATH);
-  const catch2FBX = await loadFBX(GOALKEEPER_CATCH_2_PATH);
-  const diveFBX = await loadFBX(GOALKEEPER_DIVE_PATH);
+  const [catch1FBX, catch2FBX, diveFBX] = await Promise.all([
+    loadFBX(GOALKEEPER_CATCH_1_PATH),
+    loadFBX(GOALKEEPER_CATCH_2_PATH),
+    loadFBX(GOALKEEPER_DIVE_PATH)
+  ]);
 
   if (catch1FBX.animations?.length) {
     goalkeeperActions.catch1 = goalkeeperMixer.clipAction(catch1FBX.animations[0]);
@@ -1360,6 +1323,71 @@ function updateShotReset(deltaTime) {
   }
 }
 
+function applyRunPose(deltaTime) {
+  if (!playerModel) return;
+
+  const moving = playerMoveBlend;
+  const running = playerRunBlend;
+  const motion = Math.max(moving, running);
+
+  if (motion <= 0.02) return;
+
+  const t = performance.now() * 0.01 * (running > 0.5 ? 1.45 : 0.9);
+  const legSwing = Math.sin(t) * (running > 0.5 ? 0.95 : 0.45) * motion;
+  const armSwing = Math.sin(t) * (running > 0.5 ? 0.75 : 0.35) * motion;
+  const kneeBend = Math.abs(Math.sin(t)) * (running > 0.5 ? 0.55 : 0.22) * motion;
+
+  playerModel.traverse((child) => {
+    if (!child.isBone) return;
+
+    const name = child.name.toLowerCase();
+
+    if (name.includes('leftarm') && !name.includes('forearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 + armSwing, 0.18);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.05, 0.18);
+    }
+
+    if (name.includes('rightarm') && !name.includes('forearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.55 - armSwing, 0.18);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.05, 0.18);
+    }
+
+    if (name.includes('leftforearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
+    }
+
+    if (name.includes('rightforearm')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -0.20, 0.18);
+    }
+
+    if (name.includes('leftupleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, legSwing, 0.2);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, 0.03, 0.2);
+    }
+
+    if (name.includes('rightupleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(child.rotation.x, -legSwing, 0.2);
+      child.rotation.z = THREE.MathUtils.lerp(child.rotation.z, -0.03, 0.2);
+    }
+
+    if (name.includes('leftleg') && !name.includes('upleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(
+        child.rotation.x,
+        0.04 + Math.max(0, -legSwing) * kneeBend,
+        0.2
+      );
+    }
+
+    if (name.includes('rightleg') && !name.includes('upleg')) {
+      child.rotation.x = THREE.MathUtils.lerp(
+        child.rotation.x,
+        0.04 + Math.max(0, legSwing) * kneeBend,
+        0.2
+      );
+    }
+  });
+}
+
 function animate() {
   requestAnimationFrame(animate);
 
@@ -1367,11 +1395,6 @@ function animate() {
 
   if (playerMixer) playerMixer.update(dt);
   if (goalkeeperMixer) goalkeeperMixer.update(dt);
-
-  if (playerModel && !pendingShot && kickLockTimer <= 0) {
-    applyStandingPose();
-    applyRunPose(dt);
-  }
 
   if (kickLockTimer > 0) {
     kickLockTimer -= dt;
@@ -1388,6 +1411,18 @@ function animate() {
       updateBall(subDt);
       updateGoalkeeper(subDt);
     }
+  }
+
+  updatePlayerAnimationState();
+
+  if (
+    playerModel &&
+    playerMoveBlend > 0.05 &&
+    !pendingShot &&
+    kickLockTimer <= 0 &&
+    !playerCurrentAction
+  ) {
+    applyRunPose(dt);
   }
 
   syncPlayerVisual();
