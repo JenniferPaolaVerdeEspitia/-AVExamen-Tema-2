@@ -16,6 +16,10 @@
   </script>
 
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       overflow: hidden;
@@ -24,50 +28,141 @@
       color: #fff;
     }
 
-    #hud {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 100;
-      background: rgba(0, 0, 0, 0.55);
-      padding: 12px 16px;
-      border-radius: 12px;
-      min-width: 220px;
-      backdrop-filter: blur(6px);
-      box-shadow: 0 4px 18px rgba(0,0,0,.3);
-    }
-
-    #hud h2 {
-      margin: 0 0 8px 0;
-      font-size: 18px;
-      color: #7ee0ff;
-    }
-
-    #hud p {
-      margin: 4px 0;
-      font-size: 14px;
-    }
-
+    /* =========================
+       MENSAJE PRINCIPAL
+    ========================= */
     #message {
       position: absolute;
-      top: 20px;
-      width: 100%;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 120;
+      min-width: 260px;
       text-align: center;
-      z-index: 100;
-      font-size: 24px;
+      font-size: 22px;
       font-weight: bold;
-      text-shadow: 0 2px 8px rgba(0,0,0,.8);
+      padding: 10px 18px;
+      border-radius: 14px;
+      background: rgba(20, 40, 65, 0.85);
+      border: 1px solid rgba(126, 224, 255, 0.25);
+      box-shadow: 0 6px 18px rgba(0,0,0,.4);
+      backdrop-filter: blur(6px);
       pointer-events: none;
     }
 
+    /* =========================
+       PANEL IZQUIERDO
+    ========================= */
+    #ui-panel {
+      position: absolute;
+      top: 70px;
+      left: 10px;
+      z-index: 110;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-start;
+      max-width: 320px;
+    }
+
+    .card-ui {
+      width: 100%;
+      background: rgba(20, 30, 45, 0.7);
+      border-radius: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,.3);
+      backdrop-filter: blur(6px);
+      color: #fff;
+    }
+
+    /* =========================
+       HUD
+    ========================= */
+    #hud {
+      padding: 12px;
+    }
+
+    #hud h2 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      color: #79e6ff;
+    }
+
+    .hud-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 10px;
+      align-items: center;
+    }
+
+    .hud-label {
+      font-size: 13px;
+      color: #dbe9f5;
+      font-weight: 600;
+    }
+
+    .hud-value {
+      min-width: 50px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.08);
+    }
+
+    /* =========================
+       INSTRUCCIONES
+    ========================= */
+    #help {
+      padding: 12px;
+    }
+
+    #help h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      color: #ffd66d;
+    }
+
+    #help p {
+      margin: 0 0 10px 0;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    #help ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+
+    #help li {
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    #help strong {
+      color: #79e6ff;
+    }
+
+    .tip-box {
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 10px;
+      background: rgba(255, 214, 109, 0.1);
+      font-size: 11px;
+      color: #fff5d6;
+    }
+
+    /* =========================
+       MIRA
+    ========================= */
     #crosshair {
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 18px;
-      height: 18px;
-      margin-left: -9px;
-      margin-top: -9px;
+      width: 20px;
+      height: 20px;
+      margin-left: -10px;
+      margin-top: -10px;
       z-index: 100;
       pointer-events: none;
     }
@@ -80,54 +175,90 @@
     }
 
     #crosshair::before {
-      left: 8px;
+      left: 9px;
       top: 0;
       width: 2px;
-      height: 18px;
+      height: 20px;
     }
 
     #crosshair::after {
-      top: 8px;
+      top: 9px;
       left: 0;
-      width: 18px;
+      width: 20px;
       height: 2px;
     }
 
-    #help {
-      position: absolute;
-      bottom: 12px;
-      left: 12px;
-      z-index: 100;
-      background: rgba(0,0,0,.45);
-      padding: 10px 14px;
-      border-radius: 10px;
-      font-size: 13px;
-      line-height: 1.5;
+    /* =========================
+       RESPONSIVE
+    ========================= */
+    @media (max-width: 900px) {
+      #ui-panel {
+        max-width: 90vw;
+      }
+
+      .card-ui {
+        width: 100%;
+      }
+
+      #message {
+        min-width: 220px;
+        max-width: 90vw;
+        font-size: 18px;
+      }
     }
   </style>
 </head>
+
 <body>
 
   <div id="message">Haz clic para comenzar</div>
 
-  <div id="hud">
-    <h2>Juego de Penales 3D</h2>
-    <p><strong>Nivel:</strong> <span id="level">1</span></p>
-    <p><strong>Tiempo:</strong> <span id="time">60</span>s</p>
-    <p><strong>Tiros:</strong> <span id="shots">15</span></p>
-    <p><strong>Goles:</strong> <span id="goals">0</span></p>
-    <p><strong>Meta:</strong> <span id="goalTarget">2</span></p>
+  <div id="ui-panel">
+    <div id="hud" class="card-ui">
+      <h2>Juego de Penales 3D</h2>
+
+      <div class="hud-grid">
+        <div class="hud-label">Nivel</div>
+        <div class="hud-value"><span id="level">1</span></div>
+
+        <div class="hud-label">Tiempo</div>
+        <div class="hud-value"><span id="time">60</span>s</div>
+
+        <div class="hud-label">Tiros</div>
+        <div class="hud-value"><span id="shots">15</span></div>
+
+        <div class="hud-label">Goles</div>
+        <div class="hud-value"><span id="goals">0</span></div>
+
+        <div class="hud-label">Meta</div>
+        <div class="hud-value"><span id="goalTarget">2</span></div>
+      </div>
+    </div>
+
+    <div id="help" class="card-ui">
+      <h3>Instrucciones</h3>
+
+      <p>
+        Anota los goles necesarios antes de que se termine el tiempo o los tiros.
+      </p>
+
+      <ul>
+        <li><strong>Mouse:</strong> apuntar</li>
+        <li><strong>Click:</strong> disparar</li>
+        <li><strong>W A S D:</strong> mover</li>
+        <li><strong>Shift:</strong> correr</li>
+        <li><strong>Espacio:</strong> saltar</li>
+      </ul>
+
+      <div class="tip-box">
+        Consejo: apunta lejos del portero para tener más probabilidad de gol.
+      </div>
+    </div>
   </div>
 
   <div id="crosshair"></div>
 
-  <div id="help">
-    Mouse: apuntar<br>
-    Click izquierdo: disparar<br>
-    WASD: mover al jugador<br>
-    Shift: correr
-  </div>
-
   <script type="module" src="./main.js"></script>
+
 </body>
 </html>

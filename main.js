@@ -24,10 +24,12 @@ const PLAYER_VISUAL_ROT_Y = Math.PI;
 const PLAYER_VISUAL_ROT_X = 0;
 const GOALKEEPER_VISUAL_ROT_Y = 0;
 
+// Ya no dependemos tanto de esta escala fija para el jugador,
+// pero se deja para el portero.
 const GOALKEEPER_SCALE = 0.0125;
 
 // Posiciones base
-const PLAYER_START = new THREE.Vector3(0, 0.6, 8.8);
+const PLAYER_START = new THREE.Vector3(0, 0.6, 10.5);
 const GOALKEEPER_HOME = new THREE.Vector3(0, 0.0, -18.2);
 
 // Caja de gol
@@ -179,6 +181,7 @@ let playerActions = {
 };
 let playerCurrentAction = null;
 
+// offset visual del jugador ya centrado
 let playerModelBaseY = 0;
 
 let goalkeeperRoot = null;
@@ -419,6 +422,38 @@ function setShadows(object, tint = null, forceSolid = false) {
   });
 }
 
+function normalizeModelToGround(object3D, desiredHeight = 1.8) {
+  const initialBox = new THREE.Box3().setFromObject(object3D);
+  const initialSize = new THREE.Vector3();
+  initialBox.getSize(initialSize);
+
+  const safeHeight = Math.max(initialSize.y, 0.0001);
+  const autoScale = desiredHeight / safeHeight;
+  object3D.scale.setScalar(autoScale);
+
+  object3D.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(object3D);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  object3D.position.x -= center.x;
+  object3D.position.z -= center.z;
+  object3D.position.y -= box.min.y;
+
+  object3D.updateMatrixWorld(true);
+
+  const finalBox = new THREE.Box3().setFromObject(object3D);
+  const finalSize = new THREE.Vector3();
+  finalBox.getSize(finalSize);
+
+  return {
+    scale: autoScale,
+    size: finalSize,
+    box: finalBox
+  };
+}
+
 function applyStandingPose() {
   if (!playerModel) return;
 
@@ -474,7 +509,7 @@ function applyStandingPose() {
   });
 }
 
-function applyRunPose() {
+function applyRunPose(deltaTime) {
   if (!playerModel) return;
 
   const moving = playerMoveBlend;
@@ -658,13 +693,13 @@ function getBallStartPosition() {
   const base = new THREE.Vector3(
     playerCollider.start.x,
     0,
-    playerCollider.start.z - 0.9
+    playerCollider.start.z
   );
 
   return new THREE.Vector3(
-    base.x + forward.x * 0.05,
+    base.x + forward.x * 0.06,
     BALL_RADIUS - 0.01,
-    base.z + forward.z * 0.05
+    base.z + forward.z * 0.06
   );
 }
 
@@ -1016,7 +1051,7 @@ function advanceLevel() {
 // ======================================================
 function shootBall() {
   if (!ball.mesh) return;
-  if (!gameStarted || gamePaused || !playerCanShoot || !ball.active || !ball.visible || ball.kicked) return;
+  if (!gameStarted || gamePaused || !playerCanShoot || !ball.active || ball.kicked) return;
   if (shotsLeft <= 0 || timeLeft <= 0) return;
 
   playerCanShoot = false;
@@ -1148,24 +1183,7 @@ async function loadPlayer() {
 
   setShadows(playerModel, new THREE.Color(1.2, 1.2, 1.2), true);
 
-  const manualScale = 220;
-  playerModel.scale.setScalar(manualScale);
-  playerModel.updateMatrixWorld(true);
-
-  const box = new THREE.Box3().setFromObject(playerModel);
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-
-  playerModel.position.x -= center.x;
-  playerModel.position.z -= center.z;
-  playerModel.position.y -= box.min.y;
-
-  playerModel.updateMatrixWorld(true);
-
-  const finalBox = new THREE.Box3().setFromObject(playerModel);
-  const finalSize = new THREE.Vector3();
-  finalBox.getSize(finalSize);
-
+  const result = normalizeModelToGround(playerModel, 1.8);
   playerModelBaseY = playerModel.position.y;
 
   playerRoot.add(playerModel);
@@ -1187,8 +1205,8 @@ async function loadPlayer() {
   syncPlayerVisual();
 
   console.log('Jugador cargado correctamente');
-  console.log('Escala manual jugador:', manualScale);
-  console.log('Tamaño final jugador:', finalSize);
+  console.log('Escala automática jugador:', result.scale);
+  console.log('Tamaño final jugador:', result.size);
 }
 
 async function loadGoalkeeper() {
@@ -1352,7 +1370,7 @@ function animate() {
 
   if (playerModel && !pendingShot && kickLockTimer <= 0) {
     applyStandingPose();
-    applyRunPose();
+    applyRunPose(dt);
   }
 
   if (kickLockTimer > 0) {
